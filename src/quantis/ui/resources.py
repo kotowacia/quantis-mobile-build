@@ -1,0 +1,159 @@
+"""Загрузка QSS-тем и путей к ресурсам."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+
+from quantis.ui.design_tokens import ACCENT_FALLBACK
+from quantis.utils import get_asset_path
+
+
+def ui_theme_labels() -> dict[str, str]:
+    """Id темы → название для настроек, в порядке показа."""
+    from quantis.ui.themes import registry
+
+    return {theme.id: theme.label for theme in registry.all()}
+
+
+def styles_dir() -> Path:
+    from quantis.utils.resource_path import package_root
+
+    root = package_root()
+    for candidate in (root / "styles", root / "quantis" / "styles"):
+        if candidate.is_dir():
+            return candidate
+    return Path(__file__).resolve().parent.parent / "styles"
+
+
+def icon_path(name: str) -> str:
+    return get_asset_path(f"assets/icons/{name}")
+
+
+_ICON_CACHE: dict[tuple[str, int], QIcon] = {}
+_TINT_PX = 64
+
+
+def load_icon(name: str, color: QColor | None = None) -> QIcon:
+    """Иконка из assets/icons; ``color`` — перекрасить в один сплошной цвет."""
+    key = (name, color.rgba() if color is not None else 0)
+    cached = _ICON_CACHE.get(key)
+    if cached is not None:
+        return cached
+    icon = QIcon(icon_path(name))
+    if color is not None:
+        pixmap = icon.pixmap(_TINT_PX, _TINT_PX)
+        painter = QPainter(pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(pixmap.rect(), color)
+        painter.end()
+        icon = QIcon(pixmap)
+    _ICON_CACHE[key] = icon
+    return icon
+
+
+_DISABLED_OPACITY = 0.32
+
+
+def faded_when_disabled(icon: QIcon) -> QIcon:
+    """Неактивный значок — тот же цвет, но полупрозрачный.
+
+    Qt сам делает неактивный значок светло-серым: на тёмной теме такой
+    значок не отличить от активного белого.
+    """
+    if icon.isNull():
+        return icon
+    source = icon.pixmap(_TINT_PX, _TINT_PX)
+    faded = QPixmap(source.size())
+    faded.setDevicePixelRatio(source.devicePixelRatio())
+    faded.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(faded)
+    painter.setOpacity(_DISABLED_OPACITY)
+    painter.drawPixmap(0, 0, source)
+    painter.end()
+    # Из готовых кадров: SVG-движок QIcon рисует Disabled сам, мимо addPixmap.
+    result = QIcon()
+    result.addPixmap(source, QIcon.Mode.Normal, QIcon.State.Off)
+    result.addPixmap(faded, QIcon.Mode.Disabled, QIcon.State.Off)
+    return result
+
+
+def on_color(background: QColor) -> QColor:
+    """Цвет значка/текста поверх заливки ``background``: тёмный на светлом, белый на тёмном."""
+    r, g, b = background.redF(), background.greenF(), background.blueF()
+    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return QColor(11, 13, 18) if luminance > 0.45 else QColor(255, 255, 255)
+
+
+def normalize_ui_theme(ui_theme: str | None) -> str:
+    from quantis.ui.themes import registry
+
+    return registry.resolve_id(ui_theme)
+
+
+def wallpaper_path() -> str:
+    from quantis.ui.preferences import UiPreferences
+    from quantis.ui.wallpapers import resolve_wallpaper_path
+
+    prefs = UiPreferences()
+    if not prefs.wallpaper_enabled:
+        return ""
+    return resolve_wallpaper_path(prefs.wallpaper_path or None)
+
+
+def dynamic_accent_qss(accent: QColor | None = None, *, rounded: bool = True) -> str:
+    """Runtime-фрагмент QSS с динамическим акцентом из обложки."""
+    play_radius, bar_radius = ("20px", "2px") if rounded else ("0", "0")
+    if accent is None or not accent.isValid():
+        accent = QColor(ACCENT_FALLBACK)
+    rgb = f"rgb({accent.red()}, {accent.green()}, {accent.blue()})"
+    rgba40 = f"rgba({accent.red()}, {accent.green()}, {accent.blue()}, 102)"
+    return f"""
+#controlButton[accent=true] {{
+    background: {rgb};
+    border-radius: {play_radius};
+}}
+#controlButton[accent=true]:hover {{
+    background: {rgba40};
+}}
+#trackTitle[playing="true"] {{ color: {rgb}; }}
+#nowPlayingAccent {{ color: {rgb}; }}
+#seekSlider::sub-page:horizontal {{
+    background: {rgb};
+    border-radius: {bar_radius};
+}}
+#seekSlider::handle:horizontal {{
+    border: 2px solid {rgb};
+}}
+"""
+
+
+# Правила dynamic_accent_qss, разложенные по виджетам (см. quantis.ui.accent).
+# #controlButton[accent=true] не переносим: его background перекрывает
+# «background: transparent» на appContent/bodyForeground, он не виден.
+# #sideNavRail тоже: его перебивает QFrame#sideNavRail, рельс рисует акцент сам.
+ACCENT_TRACK_TITLE_QSS = '#trackTitle[playing="true"] { color: ${rgb}; }'
+
+
+def load_stylesheet(
+    ui_theme: str | None = None,
+    *,
+    accent: QColor | None = None,
+) -> str:
+    """QSS темы; ``accent`` — акцент обложки для правил dynamic_accent_qss."""
+    from quantis.ui.themes import qss, registry
+
+    theme = registry.get(ui_theme)
+    sheet = qss.render(theme)
+    if accent is None:
+        return sheet
+    return qss.merge(sheet, dynamic_accent_qss(accent, rounded=theme.rounded))
+
+
+def format_ms(ms: int) -> str:
+    if ms < 0:
+        ms = 0
+    total_sec = ms // 1000
+    minutes, seconds = divmod(total_sec, 60)
+    return f"{minutes}:{seconds:02d}"

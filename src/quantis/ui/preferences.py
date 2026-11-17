@@ -1,0 +1,490 @@
+"""Пользовательские настройки интерфейса (QSettings)."""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from PySide6.QtCore import QByteArray, QObject, QSettings, Signal, SignalInstance
+
+from quantis.models.repeat_mode import RepeatMode
+from quantis.ui.resources import normalize_ui_theme
+from quantis.ui.themes import registry
+from quantis.ui.themes.spec import ThemeSpec
+
+BackdropMode = Literal["palette", "cover", "image", "video"]
+BACKDROP_MODES: tuple[BackdropMode, ...] = ("palette", "cover", "image", "video")
+
+
+class UiPreferences(QObject):
+    """Синглтон настроек UI.
+
+    Сигналы по смыслу: слушай только то, от чего зависишь. ``changed`` —
+    для совместимости с плагинами (любая пользовательская настройка, кроме
+    громкости, повтора, геометрии окна и служебных полей обновлений); внутри
+    приложения на него не подписываемся.
+    """
+
+    changed = Signal()
+    theme_changed = Signal()
+    # Статичные и динамические (видео) обои: вкл/выкл, путь, качество, fps, задержка.
+    wallpaper_changed = Signal()
+    # Панели главной и «Сейчас играет».
+    layout_changed = Signal()
+    eco_changed = Signal()
+    # Прокси для YouTube.
+    network_changed = Signal()
+    volume_changed = Signal(int)
+
+    _instance: UiPreferences | None = None
+
+    _KEY_UI_THEME = "ui/theme"
+    _KEY_DYNAMIC_WALLPAPER = "ui/dynamic_wallpaper"
+    _KEY_WALLPAPER_QUALITY = "ui/dynamic_wallpaper_quality"
+    _KEY_WALLPAPER_FPS = "ui/dynamic_wallpaper_fps"
+    _KEY_WALLPAPER_AV_DELAY = "ui/dynamic_wallpaper_av_delay_ms"
+    _KEY_WALLPAPER = "ui/wallpaper_path"
+    _KEY_WALLPAPER_ENABLED = "ui/wallpaper_enabled"
+    _KEY_BACKDROP_MODE = "ui/backdrop_mode"
+    _KEY_BACKDROP_MOTION = "ui/backdrop_motion"
+    _KEY_BACKDROP_VIDEO_FILE = "ui/backdrop_video_file"
+    _KEY_BACKDROP_DIM = "ui/backdrop_dim"
+    _KEY_BACKDROP_BLUR = "ui/backdrop_blur"
+    _KEY_SIDE_PANEL = "ui/side_panel"
+    _KEY_NAV_EXPANDED = "ui/nav_expanded"
+    _KEY_BACKGROUND_ECO = "ui/background_eco"
+    _KEY_MINI_PLAYER = "ui/mini_player"
+    _KEY_VOLUME = "playback/volume"
+    _KEY_REPEAT_MODE = "playback/repeat_mode"
+    _KEY_MUSIC_DIR = "storage/music_dir"
+    _KEY_YOUTUBE_PROXY = "network/youtube_proxy"
+    _KEY_WINDOW_GEOMETRY = "ui/window_geometry"
+    _KEY_UPDATE_LAST_CHECK = "updates/last_check_at"
+    _KEY_UPDATE_LAST_TAG = "updates/last_tag"
+    _KEY_UPDATE_LAST_URL = "updates/last_html_url"
+    _KEY_UPDATE_DISMISSED_TAG = "updates/dismissed_tag"
+    _KEY_UPDATE_CHECK_ON_STARTUP = "updates/check_on_startup"
+
+    def __new__(cls) -> UiPreferences:
+        if cls._instance is None:
+            obj = super().__new__(cls)
+            obj._initialized = False
+            cls._instance = obj
+        return cls._instance
+
+    def __init__(self) -> None:
+        if self._initialized:
+            return
+        super().__init__()
+        self._settings = QSettings("ReallyFun", "Quantis")
+        # тему читают из paintEvent — QSettings на каждый кадр дорого
+        self._ui_theme: str | None = None
+        self._initialized = True
+
+    def _emit(self, signal: SignalInstance) -> None:
+        signal.emit()
+        self.changed.emit()
+
+    @staticmethod
+    def _read_bool(raw: object, default: bool) -> bool:
+        if isinstance(raw, str):
+            return raw.lower() in ("true", "1", "yes")
+        if raw is None:
+            return default
+        return bool(raw)
+
+    @staticmethod
+    def _read_int(raw: object, default: int) -> int:
+        try:
+            return int(raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _read_float(raw: object, default: float) -> float:
+        try:
+            return float(raw)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return default
+
+    SIDE_PANELS = ("", "queue", "lyrics")
+    """Правая выдвижная панель: закрыта, «Очередь» или «Текст»."""
+
+    @property
+    def side_panel(self) -> str:
+        raw = str(self._settings.value(self._KEY_SIDE_PANEL, "") or "")
+        return raw if raw in self.SIDE_PANELS else ""
+
+    def set_side_panel(self, value: str) -> None:
+        value = value if value in self.SIDE_PANELS else ""
+        if self.side_panel == value:
+            return
+        self._settings.setValue(self._KEY_SIDE_PANEL, value)
+        self._emit(self.layout_changed)
+
+    @property
+    def nav_expanded(self) -> bool:
+        """Меню слева с подписями (иначе — только значки)."""
+        return self._read_bool(self._settings.value(self._KEY_NAV_EXPANDED, True), True)
+
+    def set_nav_expanded(self, value: bool) -> None:
+        if self.nav_expanded == value:
+            return
+        self._settings.setValue(self._KEY_NAV_EXPANDED, value)
+        self._emit(self.layout_changed)
+
+    @property
+    def ui_theme(self) -> str:
+        if self._ui_theme is None:
+            raw = self._settings.value(self._KEY_UI_THEME, registry.DEFAULT_ID)
+            self._ui_theme = normalize_ui_theme(str(raw) if raw is not None else None)
+        return self._ui_theme
+
+    @property
+    def theme(self) -> ThemeSpec:
+        """Описание текущей темы."""
+        return registry.get(self.ui_theme)
+
+    def set_ui_theme(self, theme_id: str) -> None:
+        theme_id = normalize_ui_theme(theme_id)
+        if self.ui_theme == theme_id:
+            return
+        self._settings.setValue(self._KEY_UI_THEME, theme_id)
+        self._ui_theme = theme_id
+        self._emit(self.theme_changed)
+
+    @property
+    def dynamic_wallpaper_enabled(self) -> bool:
+        return self._read_bool(
+            self._settings.value(self._KEY_DYNAMIC_WALLPAPER, False),
+            False,
+        )
+
+    def set_dynamic_wallpaper_enabled(self, value: bool) -> None:
+        if self.dynamic_wallpaper_enabled == value:
+            return
+        self._settings.setValue(self._KEY_DYNAMIC_WALLPAPER, value)
+        self._emit(self.wallpaper_changed)
+
+    @property
+    def dynamic_wallpaper_quality(self) -> int:
+        from quantis.services.wallpaper_policy import (
+            WALLPAPER_DEFAULT_QUALITY,
+            clamp_wallpaper_quality,
+        )
+
+        raw = self._settings.value(
+            self._KEY_WALLPAPER_QUALITY, WALLPAPER_DEFAULT_QUALITY
+        )
+        return clamp_wallpaper_quality(self._read_int(raw, WALLPAPER_DEFAULT_QUALITY))
+
+    def set_dynamic_wallpaper_quality(self, value: int) -> None:
+        from quantis.services.wallpaper_policy import clamp_wallpaper_quality
+
+        clamped = clamp_wallpaper_quality(int(value))
+        if self.dynamic_wallpaper_quality == clamped:
+            return
+        self._settings.setValue(self._KEY_WALLPAPER_QUALITY, clamped)
+        self._emit(self.wallpaper_changed)
+
+    @property
+    def dynamic_wallpaper_fps(self) -> int:
+        from quantis.services.wallpaper_policy import (
+            WALLPAPER_DEFAULT_FPS,
+            clamp_wallpaper_fps,
+        )
+
+        raw = self._settings.value(self._KEY_WALLPAPER_FPS, WALLPAPER_DEFAULT_FPS)
+        return clamp_wallpaper_fps(self._read_int(raw, WALLPAPER_DEFAULT_FPS))
+
+    def set_dynamic_wallpaper_fps(self, value: int) -> None:
+        from quantis.services.wallpaper_policy import clamp_wallpaper_fps
+
+        clamped = clamp_wallpaper_fps(int(value))
+        if self.dynamic_wallpaper_fps == clamped:
+            return
+        self._settings.setValue(self._KEY_WALLPAPER_FPS, clamped)
+        self._emit(self.wallpaper_changed)
+
+    @property
+    def dynamic_wallpaper_av_delay_ms(self) -> int:
+        """На сколько видео-фон отстаёт от позиции звука (задержка аудиовыхода)."""
+        from quantis.services.wallpaper_policy import (
+            WALLPAPER_DEFAULT_AV_DELAY_MS,
+            clamp_wallpaper_av_delay,
+        )
+
+        raw = self._settings.value(
+            self._KEY_WALLPAPER_AV_DELAY, WALLPAPER_DEFAULT_AV_DELAY_MS
+        )
+        return clamp_wallpaper_av_delay(
+            self._read_int(raw, WALLPAPER_DEFAULT_AV_DELAY_MS)
+        )
+
+    def set_dynamic_wallpaper_av_delay_ms(self, value: int) -> None:
+        from quantis.services.wallpaper_policy import clamp_wallpaper_av_delay
+
+        clamped = clamp_wallpaper_av_delay(value)
+        if self.dynamic_wallpaper_av_delay_ms == clamped:
+            return
+        self._settings.setValue(self._KEY_WALLPAPER_AV_DELAY, clamped)
+        self._emit(self.wallpaper_changed)
+
+    @property
+    def wallpaper_path(self) -> str:
+        raw = self._settings.value(self._KEY_WALLPAPER, "")
+        return str(raw).strip() if raw else ""
+
+    def set_wallpaper_path(self, path: str) -> None:
+        normalized = path.strip()
+        if self.wallpaper_path == normalized:
+            return
+        self._settings.setValue(self._KEY_WALLPAPER, normalized)
+        self._emit(self.wallpaper_changed)
+
+    @property
+    def youtube_proxy(self) -> str:
+        """Прокси для всего, что ходит к YouTube; пусто — напрямую."""
+        raw = self._settings.value(self._KEY_YOUTUBE_PROXY, "")
+        return str(raw).strip() if raw else ""
+
+    def set_youtube_proxy(self, value: str) -> None:
+        """Адрес уже проверен (``net_proxy.normalize_proxy``)."""
+        normalized = value.strip()
+        if normalized == self.youtube_proxy:
+            return
+        self._settings.setValue(self._KEY_YOUTUBE_PROXY, normalized)
+        self._emit(self.network_changed)
+
+    @property
+    def wallpaper_enabled(self) -> bool:
+        return self._read_bool(
+            self._settings.value(self._KEY_WALLPAPER_ENABLED, False),
+            False,
+        )
+
+    def set_wallpaper_enabled(self, value: bool) -> None:
+        if self.wallpaper_enabled == value:
+            return
+        self._settings.setValue(self._KEY_WALLPAPER_ENABLED, value)
+        self._emit(self.wallpaper_changed)
+
+    @property
+    def backdrop_mode(self) -> BackdropMode:
+        """Что лежит под интерфейсом: цвета трека / обложка / картинка / клип.
+
+        «Клип» и «картинка» — это существующие ``dynamic_wallpaper_enabled`` и
+        ``wallpaper_enabled`` (их же показывает раздел «Обои»); хранится только
+        выбор между цветами трека и обложкой, когда ни то ни другое не включено."""
+        if self.dynamic_wallpaper_enabled:
+            return "video"
+        if self.wallpaper_enabled:
+            return "image"
+        raw = str(self._settings.value(self._KEY_BACKDROP_MODE, "palette"))
+        if raw == "video" and self.backdrop_video_file:
+            return "video"  # свой видеофайл вместо клипов треков
+        return "cover" if raw == "cover" else "palette"
+
+    def set_backdrop_mode(self, mode: BackdropMode) -> None:
+        if mode not in BACKDROP_MODES:
+            return
+        if mode == self.backdrop_mode and not (
+            mode == "video" and not self.dynamic_wallpaper_enabled
+        ):
+            return
+        # «Клип» отсюда — клипы треков с YouTube (свой файл — set_backdrop_video_file)
+        self._settings.setValue(self._KEY_DYNAMIC_WALLPAPER, mode == "video")
+        self._settings.setValue(self._KEY_WALLPAPER_ENABLED, mode == "image")
+        self._settings.setValue(self._KEY_BACKDROP_MODE, mode)
+        self._emit(self.wallpaper_changed)
+
+    @property
+    def backdrop_video_file(self) -> str:
+        """Свой видеофайл фоном (по кругу, без звука) — вместо клипов треков."""
+        raw = self._settings.value(self._KEY_BACKDROP_VIDEO_FILE, "")
+        return str(raw).strip() if raw else ""
+
+    @property
+    def backdrop_video_is_file(self) -> bool:
+        return self.backdrop_mode == "video" and not self.dynamic_wallpaper_enabled
+
+    def set_backdrop_video_file(self, path: str) -> None:
+        """Режим «Клип» со своим файлом: клипы треков выключаются."""
+        normalized = path.strip()
+        if not normalized or (
+            self.backdrop_video_is_file and normalized == self.backdrop_video_file
+        ):
+            return
+        self._settings.setValue(self._KEY_BACKDROP_VIDEO_FILE, normalized)
+        self._settings.setValue(self._KEY_DYNAMIC_WALLPAPER, False)
+        self._settings.setValue(self._KEY_WALLPAPER_ENABLED, False)
+        self._settings.setValue(self._KEY_BACKDROP_MODE, "video")
+        self._emit(self.wallpaper_changed)
+
+    @property
+    def backdrop_motion(self) -> bool:
+        """Медленный дрейф обложки в режиме «Обложка»."""
+        return self._read_bool(
+            self._settings.value(self._KEY_BACKDROP_MOTION, True), True
+        )
+
+    def set_backdrop_motion(self, value: bool) -> None:
+        if self.backdrop_motion == value:
+            return
+        self._settings.setValue(self._KEY_BACKDROP_MOTION, value)
+        self._emit(self.wallpaper_changed)
+
+    @property
+    def backdrop_dim(self) -> float:
+        """Затемнение картинки/клипа под интерфейсом, 0..1 (к нему фон добавляет
+        автоматическое, если кадр слишком светлый)."""
+        raw = self._read_float(self._settings.value(self._KEY_BACKDROP_DIM, 0.3), 0.3)
+        return max(0.0, min(1.0, raw))
+
+    def set_backdrop_dim(self, value: float) -> None:
+        clamped = round(max(0.0, min(1.0, float(value))), 3)
+        if self.backdrop_dim == clamped:
+            return
+        self._settings.setValue(self._KEY_BACKDROP_DIM, clamped)
+        self._emit(self.wallpaper_changed)
+
+    @property
+    def backdrop_blur(self) -> float:
+        """Размытие картинки/клипа под интерфейсом, 0..1."""
+        raw = self._read_float(self._settings.value(self._KEY_BACKDROP_BLUR, 0.1), 0.1)
+        return max(0.0, min(1.0, raw))
+
+    def set_backdrop_blur(self, value: float) -> None:
+        clamped = round(max(0.0, min(1.0, float(value))), 3)
+        if self.backdrop_blur == clamped:
+            return
+        self._settings.setValue(self._KEY_BACKDROP_BLUR, clamped)
+        self._emit(self.wallpaper_changed)
+
+    @property
+    def mini_player_enabled(self) -> bool:
+        """Кнопка «Мини-плеер» в нижней панели. По умолчанию выключена."""
+        return self._read_bool(
+            self._settings.value(self._KEY_MINI_PLAYER, False), False
+        )
+
+    def set_mini_player_enabled(self, value: bool) -> None:
+        if self.mini_player_enabled == value:
+            return
+        self._settings.setValue(self._KEY_MINI_PLAYER, value)
+        self._emit(self.layout_changed)
+
+    @property
+    def background_eco_enabled(self) -> bool:
+        """Экономия ресурсов, пока окно свёрнуто / не в фокусе (игры)."""
+        return self._read_bool(
+            self._settings.value(self._KEY_BACKGROUND_ECO, True),
+            True,
+        )
+
+    def set_background_eco_enabled(self, value: bool) -> None:
+        if self.background_eco_enabled == value:
+            return
+        self._settings.setValue(self._KEY_BACKGROUND_ECO, value)
+        self._emit(self.eco_changed)
+
+    @property
+    def volume(self) -> int:
+        raw = self._settings.value(self._KEY_VOLUME, 80)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return 80
+        return max(0, min(100, value))
+
+    def set_volume(self, value: int) -> None:
+        clamped = max(0, min(100, int(value)))
+        if self.volume == clamped:
+            return
+        self._settings.setValue(self._KEY_VOLUME, clamped)
+        self.volume_changed.emit(clamped)
+
+    @property
+    def repeat_mode(self) -> RepeatMode:
+        raw = self._settings.value(self._KEY_REPEAT_MODE, RepeatMode.PLAYLIST.value)
+        return RepeatMode.from_value(str(raw) if raw is not None else None)
+
+    def set_repeat_mode(self, mode: RepeatMode) -> None:
+        if self.repeat_mode == mode:
+            return
+        self._settings.setValue(self._KEY_REPEAT_MODE, mode.value)
+
+    @property
+    def window_geometry(self) -> QByteArray | None:
+        raw = self._settings.value(self._KEY_WINDOW_GEOMETRY)
+        if isinstance(raw, QByteArray) and not raw.isEmpty():
+            return raw
+        if isinstance(raw, (bytes, bytearray)) and raw:
+            return QByteArray(bytes(raw))
+        return None
+
+    def set_window_geometry(self, geometry: QByteArray) -> None:
+        self._settings.setValue(self._KEY_WINDOW_GEOMETRY, geometry)
+        self._settings.sync()
+
+    @property
+    def music_dir(self) -> str:
+        """Папка для скачанных треков. Пусто — каталог по умолчанию."""
+        raw = self._settings.value(self._KEY_MUSIC_DIR, "")
+        return str(raw).strip() if raw else ""
+
+    def set_music_dir(self, path: str) -> None:
+        from quantis.utils import app_paths
+
+        normalized = path.strip()
+        if self.music_dir == normalized:
+            return
+        self._settings.setValue(self._KEY_MUSIC_DIR, normalized)
+        self._settings.sync()
+        app_paths.reset_music_dir_cache()
+        self.changed.emit()
+
+    @property
+    def update_check_on_startup(self) -> bool:
+        return self._read_bool(
+            self._settings.value(self._KEY_UPDATE_CHECK_ON_STARTUP, True),
+            True,
+        )
+
+    def set_update_check_on_startup(self, value: bool) -> None:
+        if self.update_check_on_startup == value:
+            return
+        self._settings.setValue(self._KEY_UPDATE_CHECK_ON_STARTUP, value)
+
+    @property
+    def update_last_check_at(self) -> float:
+        return self._read_float(
+            self._settings.value(self._KEY_UPDATE_LAST_CHECK, 0),
+            0.0,
+        )
+
+    def set_update_last_check_at(self, value: float) -> None:
+        self._settings.setValue(self._KEY_UPDATE_LAST_CHECK, int(value))
+
+    @property
+    def update_last_tag(self) -> str:
+        raw = self._settings.value(self._KEY_UPDATE_LAST_TAG, "")
+        return str(raw).strip() if raw else ""
+
+    def set_update_last_tag(self, tag: str) -> None:
+        self._settings.setValue(self._KEY_UPDATE_LAST_TAG, tag.strip())
+
+    @property
+    def update_last_html_url(self) -> str:
+        raw = self._settings.value(self._KEY_UPDATE_LAST_URL, "")
+        return str(raw).strip() if raw else ""
+
+    def set_update_last_html_url(self, url: str) -> None:
+        self._settings.setValue(self._KEY_UPDATE_LAST_URL, url.strip())
+
+    @property
+    def update_dismissed_tag(self) -> str:
+        raw = self._settings.value(self._KEY_UPDATE_DISMISSED_TAG, "")
+        return str(raw).strip() if raw else ""
+
+    def set_update_dismissed_tag(self, tag: str) -> None:
+        self._settings.setValue(self._KEY_UPDATE_DISMISSED_TAG, tag.strip())

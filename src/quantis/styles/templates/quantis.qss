@@ -1,0 +1,191 @@
+* {
+    font-family: ${font_ui};
+}
+
+QWidget#appShell,
+QWidget#appContent,
+QWidget#bodyWithWallpaper,
+QWidget#bodyForeground,
+QWidget#wallpaperBackdrop,
+QWidget#backgroundLayerHost,
+QMainWindow,
+QWidget#pageStack {
+    background: transparent;
+}
+
+QScrollArea#settingsScroll {
+    background: transparent;
+    border: none;
+}
+
+QScrollArea#settingsScroll > QWidget > QWidget {
+    background: transparent;
+}
+
+QListView#trackList,
+QTableView#trackList {
+    background: transparent;
+    border: none;
+    outline: none;
+}
+
+QListView#trackList::item {
+    border: none;
+    padding: 0;
+    background: transparent;
+}
+
+QListView#trackList::item:selected {
+    background: transparent;
+}
+
+QFrame#appHeader {
+    border-top-left-radius: ${r12};
+    border-top-right-radius: ${r12};
+    min-height: 52px;
+    border: none;
+    border-bottom: 1px solid rgba(${ink_rgb}, 0.05);
+}
+
+QFrame#appHeader QLabel#headerGreeting {
+    font-size: 14px;
+    font-weight: 650;
+    letter-spacing: 0.2px;
+}
+
+QLabel#headerSub {
+    font-size: 11px;
+    color: rgba(${mist_rgb}, 0.45);
+    letter-spacing: 0.4px;
+}
+
+QLabel#sideBrandWordmark {
+    font-family: "Unbounded", ${font_display};
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    color: ${title};
+    background: transparent;
+}
+
+QLabel#sideBrandMark {
+    background: transparent;
+    border: none;
+}
+
+QToolButton#windowBackdropBtn,
+QToolButton#windowHideUiBtn,
+QToolButton#windowMinBtn,
+QToolButton#windowMaxBtn,
+QToolButton#windowCloseBtn {
+    background: transparent;
+    border: none;
+    border-radius: ${r10};
+    padding: 0;
+    margin: 0;
+}
+
+QToolButton#windowBackdropBtn:hover,
+QToolButton#windowHideUiBtn:hover,
+QToolButton#windowMinBtn:hover,
+QToolButton#windowMaxBtn:hover {
+    background: rgba(${ink_rgb}, 0.08);
+}
+
+QToolButton#windowCloseBtn:hover {
+    background: #e81123;
+}
+
+QToolButton#windowCloseBtn:pressed {
+    background: #bf0f1d;
+}
+
+QFrame#sideNavRail QToolButton#navIconButton {
+    outline: none;
+}
+
+/* Всплывающие уведомления (правый верхний угол) */
+QLabel#notificationTitle {
+    color: ${title};
+    font-size: 13px;
+    font-weight: 700;
+    background: transparent;
+}
+
+QLabel#notificationText {
+    color: ${text_dim};
+    font-size: 12px;
+    background: transparent;
+}
+
+QLabel#notificationPercent {
+    color: ${text_dim};
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+}
+
+QToolButton#notificationClose {
+    background: transparent;
+    border: none;
+    border-radius: ${r10};
+    padding: 0;
+}
+
+QToolButton#notificationClose:hover {
+    background: rgba(${ink_rgb}, 0.10);
+}
+
+/* Панель «Фон» (поповер под кнопкой в шапке) */
+QLabel#backdropPanelTitle {
+    color: ${title};
+    font-family: ${font_display};
+    font-size: 17px;
+    font-weight: 700;
+    background: transparent;
+}
+
+QToolButton#backdropPanelPick {
+    color: ${title};
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+    border: none;
+    padding: 2px 0;
+}
+
+QToolButton#backdropPanelPick:hover {
+    color: rgb(${hl_rgb});
+}
+
+QLabel#backdropPanelHint {
+    color: ${text_dim};
+    font-size: 12px;
+    background: transparent;
+}
+
+QLabel#backdropPanelLabel {
+    color: ${text};
+    font-size: 13px;
+    font-weight: 500;
+    background: transparent;
+}
+
+QSlider#backdropSlider::groove:horizontal {
+    height: 4px;
+    border-radius: ${r2};
+    background: rgba(${ink_rgb}, 0.16);
+}
+
+QSlider#backdropSlider::sub-page:horizontal {
+    border-radius: ${r2};
+    background: ${text};
+}
+
+QSlider#backdropSlider::handle:horizontal {
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    border-radius: ${r7};
+    background: ${handle};
+}

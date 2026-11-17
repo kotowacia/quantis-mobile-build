@@ -1,0 +1,849 @@
+from __future__ import annotations
+
+import logging
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QShowEvent
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
+
+from quantis.config.media_backend import backend_display_name, resolve_media_backend
+from quantis.core.async_bridge import AsyncBridge
+from quantis.services.app_update import (
+    ReleaseInfo,
+    app_version,
+    display_version,
+    fetch_latest_release,
+    is_newer,
+    is_safe_release_url,
+)
+from quantis.services.net_proxy import (
+    check_youtube,
+    normalize_proxy,
+    set_youtube_proxy,
+)
+from quantis.services.wallpaper_policy import (
+    WALLPAPER_AV_DELAY_MAX_MS,
+    WALLPAPER_AV_DELAY_MIN_MS,
+    WALLPAPER_FPS_CHOICES,
+    WALLPAPER_QUALITY_CHOICES,
+)
+from quantis.services.youtube_diagnostics import check_youtube_full
+from quantis.ui.preferences import UiPreferences
+from quantis.ui.resources import ui_theme_labels
+from quantis.ui.shortcuts import KEYBIND_HINTS
+from quantis.ui.views.widgets.page_layout import (
+    CONTENT_MAX_W,
+    PageTitle,
+    apply_page_margins,
+)
+from quantis.ui.wallpapers import (
+    remap_renamed_wallpaper,
+    scan_wallpapers,
+    user_backgrounds_dir,
+    wallpaper_display_name,
+)
+from quantis.utils import app_paths
+
+if TYPE_CHECKING:
+    from quantis.services.music_service import MusicService
+
+logger = logging.getLogger(__name__)
+
+
+class SettingsPage(QWidget):
+    update_checked = Signal()
+
+    def __init__(
+        self,
+        preferences: UiPreferences | None = None,
+        bridge: AsyncBridge | None = None,
+        parent: QWidget | None = None,
+        music: MusicService | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._prefs = preferences or UiPreferences()
+        self._bridge = bridge
+        self._music = music
+        self._retag_running = False
+        self._update_loading = False
+        self._release_url = ""
+        self.setObjectName("settingsPage")
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setObjectName("settingsScroll")
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        apply_page_margins(layout, spacing=0)
+
+        # Страница — колонка групп: заголовок раздела и одна карточка, в
+        # которой настройки разделены линиями (раньше: панель → карточка на
+        # каждую настройку → поле, три рамки друг в друге).
+        panel = QWidget()
+        panel.setObjectName("settingsPanel")
+        panel.setMaximumWidth(CONTENT_MAX_W)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(10)
+        panel_layout.addWidget(PageTitle("Настройки"))
+        panel_layout.addSpacing(14)
+
+        group = self._begin_group(panel_layout, "Интерфейс")
+
+        theme_row, theme_body = self._row("Тема", "Внешний вид приложения")
+        self._theme_combo = QComboBox()
+        self._theme_combo.setObjectName("themeCombo")
+        self._theme_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        for theme_id, label in ui_theme_labels().items():
+            self._theme_combo.addItem(label, theme_id)
+        self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+        theme_body.addWidget(self._theme_combo)
+        self._add_row(group, theme_row)
+
+        static_wall_row, static_wall_body = self._row(
+            "Обои",
+            "По умолчанию фон без картинки — экономия ОЗУ",
+        )
+        self._wallpaper_enabled_cb = QCheckBox("Показывать статичные обои")
+        self._wallpaper_enabled_cb.setObjectName("settingsCheck")
+        self._wallpaper_enabled_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._wallpaper_enabled_cb.toggled.connect(self._on_wallpaper_enabled_toggled)
+        static_wall_body.addWidget(self._wallpaper_enabled_cb)
+
+        self._wallpaper_picker = QWidget()
+        picker_layout = QVBoxLayout(self._wallpaper_picker)
+        picker_layout.setContentsMargins(0, 4, 0, 0)
+        picker_layout.setSpacing(8)
+
+        self._wallpaper_combo = QComboBox()
+        self._wallpaper_combo.setObjectName("themeCombo")
+        self._wallpaper_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._wallpaper_combo.currentIndexChanged.connect(self._on_wallpaper_changed)
+        picker_layout.addWidget(self._wallpaper_combo)
+
+        self._wallpaper_status = QLabel()
+        self._wallpaper_status.setObjectName("settingsRowDesc")
+        self._wallpaper_status.setWordWrap(True)
+        picker_layout.addWidget(self._wallpaper_status)
+        static_wall_body.addWidget(self._wallpaper_picker)
+        self._add_row(group, static_wall_row)
+
+        wallpaper_row, wallpaper_body = self._row(
+            "Динамические обои",
+            "Видео YouTube вместо статичного фона. Качество и FPS "
+            "можно снизить, если греется видеокарта.",
+        )
+        self._dynamic_wallpaper_cb = QCheckBox("Видеофон при воспроизведении")
+        self._dynamic_wallpaper_cb.setObjectName("settingsCheck")
+        self._dynamic_wallpaper_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._dynamic_wallpaper_cb.toggled.connect(self._on_dynamic_wallpaper_toggled)
+        wallpaper_body.addWidget(self._dynamic_wallpaper_cb)
+
+        self._wallpaper_video_opts = QWidget()
+        video_opts = QVBoxLayout(self._wallpaper_video_opts)
+        video_opts.setContentsMargins(0, 4, 0, 0)
+        video_opts.setSpacing(8)
+
+        video_opts.addWidget(QLabel("Качество", objectName="settingsRowDesc"))
+        self._wallpaper_quality_combo = QComboBox()
+        self._wallpaper_quality_combo.setObjectName("themeCombo")
+        self._wallpaper_quality_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        quality_labels = {
+            360: "360p — меньше нагрузка",
+            480: "480p",
+            720: "720p — чётче",
+            1080: "1080p — максимум",
+        }
+        for height in WALLPAPER_QUALITY_CHOICES:
+            self._wallpaper_quality_combo.addItem(quality_labels[height], height)
+        self._wallpaper_quality_combo.currentIndexChanged.connect(
+            self._on_wallpaper_quality_changed
+        )
+        video_opts.addWidget(self._wallpaper_quality_combo)
+
+        video_opts.addWidget(QLabel("Кадров в секунду", objectName="settingsRowDesc"))
+        self._wallpaper_fps_combo = QComboBox()
+        self._wallpaper_fps_combo.setObjectName("themeCombo")
+        self._wallpaper_fps_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        for fps in WALLPAPER_FPS_CHOICES:
+            self._wallpaper_fps_combo.addItem(f"{fps} FPS", fps)
+        self._wallpaper_fps_combo.currentIndexChanged.connect(
+            self._on_wallpaper_fps_changed
+        )
+        video_opts.addWidget(self._wallpaper_fps_combo)
+
+        av_delay_hint = QLabel(
+            "Задержка звука: видео спешит — больше, опаздывает — меньше",
+            objectName="settingsRowDesc",
+        )
+        av_delay_hint.setWordWrap(True)
+        video_opts.addWidget(av_delay_hint)
+        self._wallpaper_av_delay_spin = QSpinBox()
+        self._wallpaper_av_delay_spin.setObjectName("settingSpin")
+        self._wallpaper_av_delay_spin.setRange(
+            WALLPAPER_AV_DELAY_MIN_MS, WALLPAPER_AV_DELAY_MAX_MS
+        )
+        self._wallpaper_av_delay_spin.setSingleStep(10)
+        self._wallpaper_av_delay_spin.setSuffix(" мс")
+        self._wallpaper_av_delay_spin.valueChanged.connect(
+            self._on_wallpaper_av_delay_changed
+        )
+        video_opts.addWidget(self._wallpaper_av_delay_spin)
+        wallpaper_body.addWidget(self._wallpaper_video_opts)
+        self._add_row(group, wallpaper_row)
+
+        eco_row, eco_body = self._row(
+            "Фоновый режим",
+            "Когда окно свёрнуто или не в фокусе — меньше CPU/GPU "
+            "(удобно при играх). Музыка продолжает играть.",
+        )
+        self._eco_cb = QCheckBox("Экономить ресурсы в фоне")
+        self._eco_cb.setObjectName("settingsCheck")
+        self._eco_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._eco_cb.toggled.connect(self._on_eco_toggled)
+        eco_body.addWidget(self._eco_cb)
+        self._add_row(group, eco_row)
+
+        mini_row, mini_body = self._row(
+            "Мини-плеер",
+            "Маленькое окно с обложкой, кнопками и перемоткой поверх других "
+            "окон. Открывается кнопкой в нижней панели, рядом с громкостью; "
+            "главное окно при этом сворачивается.",
+        )
+        self._mini_player_cb = QCheckBox("Показывать кнопку мини-плеера")
+        self._mini_player_cb.setObjectName("settingsCheck")
+        self._mini_player_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mini_player_cb.toggled.connect(self._prefs.set_mini_player_enabled)
+        mini_body.addWidget(self._mini_player_cb)
+        self._add_row(group, mini_row)
+
+        group = self._begin_group(panel_layout, "Горячие клавиши")
+        binds_row, binds_body = self._row(
+            "Binds",
+            "Работают в любом месте окна. S в поле поиска печатает букву.",
+        )
+        for key, action in KEYBIND_HINTS:
+            line = QLabel(f"{key}  —  {action}")
+            line.setObjectName("settingsRowDesc")
+            binds_body.addWidget(line)
+        self._add_row(group, binds_row)
+
+        self._build_network_group(panel_layout)
+
+        group = self._begin_group(panel_layout, "Хранилище")
+
+        music_row, music_body = self._row(
+            "Папка для скачанной музыки",
+            "Треки и обложки сохраняются сюда. Программа не пишет в свой "
+            "каталог установки, поэтому права администратора не нужны. "
+            "Кнопка «Записать теги» вшивает обложку и данные в ранее скачанные "
+            "треки и называет файлы «Исполнитель - Название».",
+        )
+        self._music_dir_label = QLabel()
+        self._music_dir_label.setObjectName("settingsRowDesc")
+        self._music_dir_label.setWordWrap(True)
+        self._music_dir_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        music_body.addWidget(self._music_dir_label)
+
+        music_buttons = QHBoxLayout()
+        music_buttons.setContentsMargins(0, 4, 0, 0)
+        music_buttons.setSpacing(8)
+        for text, slot in (
+            ("Изменить…", self._on_pick_music_dir),
+            ("Открыть", self._on_open_music_dir),
+            ("По умолчанию", self._on_reset_music_dir),
+        ):
+            button = QPushButton(text)
+            button.setObjectName("settingsButton")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(slot)
+            music_buttons.addWidget(button)
+        self._retag_button = QPushButton("Записать теги")
+        self._retag_button.setObjectName("settingsButton")
+        self._retag_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._retag_button.clicked.connect(self._on_retag)
+        self._retag_button.setVisible(self._music is not None)
+        music_buttons.addWidget(self._retag_button)
+        music_buttons.addStretch()
+        music_body.addLayout(music_buttons)
+        self._retag_status = QLabel()
+        self._retag_status.setObjectName("settingsRowDesc")
+        self._retag_status.setWordWrap(True)
+        self._retag_status.setVisible(False)
+        music_body.addWidget(self._retag_status)
+        self._add_row(group, music_row)
+
+        data_row, data_body = self._row(
+            "Каталог данных",
+            "База истории, плейлисты, токены, плагины и пользовательские обои",
+        )
+        self._data_dir_label = QLabel()
+        self._data_dir_label.setObjectName("settingsRowDesc")
+        self._data_dir_label.setWordWrap(True)
+        self._data_dir_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        data_body.addWidget(self._data_dir_label)
+
+        open_data = QPushButton("Открыть")
+        open_data.setObjectName("settingsButton")
+        open_data.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_data.clicked.connect(self._on_open_data_dir)
+        data_buttons = QHBoxLayout()
+        data_buttons.setContentsMargins(0, 4, 0, 0)
+        data_buttons.addWidget(open_data)
+        data_buttons.addStretch()
+        data_body.addLayout(data_buttons)
+        self._add_row(group, data_row)
+
+        engine_row, engine_body = self._row(
+            "Медиадвижок",
+            "Задаётся при сборке exe (Quantis / Quantis-VLC) "
+            "или переменной QUANTIS_MEDIA_BACKEND=qt|vlc",
+        )
+        self._engine_label = QLabel(backend_display_name(resolve_media_backend()))
+        self._engine_label.setObjectName("settingsRowDesc")
+        engine_body.addWidget(self._engine_label)
+        self._add_row(group, engine_row)
+
+        group = self._begin_group(panel_layout, "О приложении")
+
+        about_row, about_body = self._row(
+            "Версия",
+            "Проверка новых релизов на GitHub. Установка — вручную со страницы релиза.",
+        )
+        self._version_label = QLabel()
+        self._version_label.setObjectName("settingsRowDesc")
+        self._version_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        about_body.addWidget(self._version_label)
+
+        self._update_status = QLabel()
+        self._update_status.setObjectName("settingsRowDesc")
+        self._update_status.setWordWrap(True)
+        about_body.addWidget(self._update_status)
+
+        self._update_startup_cb = QCheckBox("Проверять при запуске")
+        self._update_startup_cb.setObjectName("settingsCheck")
+        self._update_startup_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_startup_cb.toggled.connect(self._on_update_startup_toggled)
+        about_body.addWidget(self._update_startup_cb)
+
+        update_buttons = QHBoxLayout()
+        update_buttons.setContentsMargins(0, 4, 0, 0)
+        update_buttons.setSpacing(8)
+        self._update_check_btn = QPushButton("Проверить")
+        self._update_check_btn.setObjectName("settingsButton")
+        self._update_check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_check_btn.clicked.connect(self.check_for_update)
+        self._update_open_btn = QPushButton("Открыть релиз")
+        self._update_open_btn.setObjectName("settingsButton")
+        self._update_open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_open_btn.clicked.connect(self._on_open_release)
+        self._update_open_btn.setEnabled(False)
+        update_buttons.addWidget(self._update_check_btn)
+        update_buttons.addWidget(self._update_open_btn)
+        update_buttons.addStretch()
+        about_body.addLayout(update_buttons)
+        self._add_row(group, about_row)
+
+        panel_layout.addStretch()
+        layout.addWidget(panel)  # макс. ширина — прижат к левому краю
+        layout.addStretch()
+
+        scroll.setWidget(content)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+
+        # Разовый перенос выбора после переименования встроенных обоев
+        remapped = remap_renamed_wallpaper(self._prefs.wallpaper_path)
+        if remapped:
+            self._prefs.set_wallpaper_path(remapped)
+
+        for signal in (
+            self._prefs.theme_changed,
+            self._prefs.wallpaper_changed,
+            self._prefs.eco_changed,
+        ):
+            signal.connect(self._sync_from_preferences)
+        self._sync_from_preferences()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._refresh_wallpapers()
+
+    def _build_network_group(self, panel_layout: QVBoxLayout) -> None:
+        group = self._begin_group(panel_layout, "Сеть")
+        row, body = self._row(
+            "Прокси для YouTube",
+            "Если YouTube у вас закрыт или замедлен, треки с него не запускаются "
+            "или заикаются. Укажите адрес прокси — например, локального клиента "
+            "обхода блокировок: через него пойдут поиск, звук, клипы и обложки "
+            "YouTube. Яндекс и SoundCloud по-прежнему идут напрямую. "
+            "Пустое поле — без прокси.",
+        )
+        self._proxy_edit = QLineEdit()
+        self._proxy_edit.setObjectName("settingLineEdit")
+        self._proxy_edit.setPlaceholderText("socks5://127.0.0.1:1080")
+        self._proxy_edit.setClearButtonEnabled(True)
+        self._proxy_edit.returnPressed.connect(self._on_proxy_save)
+        body.addWidget(self._proxy_edit)
+
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 4, 0, 0)
+        buttons.setSpacing(8)
+        save = self._proxy_save_btn = QPushButton("Сохранить")
+        save.setObjectName("settingsButton")
+        save.setCursor(Qt.CursorShape.PointingHandCursor)
+        save.clicked.connect(self._on_proxy_save)
+        buttons.addWidget(save)
+        self._proxy_check_btn = QPushButton("Проверить YouTube")
+        self._proxy_check_btn.setObjectName("settingsButton")
+        self._proxy_check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._proxy_check_btn.clicked.connect(self._on_proxy_check)
+        buttons.addWidget(self._proxy_check_btn)
+        self._proxy_full_btn = QPushButton("Полная проверка")
+        self._proxy_full_btn.setObjectName("settingsButton")
+        self._proxy_full_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._proxy_full_btn.setToolTip(
+            "Сохранить адрес и проверить соединение, ссылку на трек и загрузку аудио"
+        )
+        self._proxy_full_btn.clicked.connect(self._on_proxy_full_check)
+        buttons.addWidget(self._proxy_full_btn)
+        buttons.addStretch()
+        body.addLayout(buttons)
+
+        self._proxy_status = QLabel("")
+        self._proxy_status.setObjectName("settingsRowDesc")
+        self._proxy_status.setWordWrap(True)
+        self._proxy_status.setVisible(False)
+        body.addWidget(self._proxy_status)
+        self._add_row(group, row)
+
+    def _set_proxy_status(self, text: str) -> None:
+        self._proxy_status.setText(text)
+        self._proxy_status.setVisible(bool(text))
+
+    def _on_proxy_save(self) -> None:
+        if self._save_proxy_value():
+            self._on_proxy_check()
+
+    def _save_proxy_value(self) -> bool:
+        try:
+            value = normalize_proxy(self._proxy_edit.text())
+        except ValueError as exc:
+            self._set_proxy_status(str(exc))
+            return False
+        self._proxy_edit.setText(value)
+        self._prefs.set_youtube_proxy(value)
+        set_youtube_proxy(value)
+        self._set_proxy_status(
+            "Прокси сохранён." if value else "Прокси выключен: YouTube идёт напрямую."
+        )
+        return True
+
+    def _on_proxy_check(self) -> None:
+        """Проверяет сохранённый способ связи, а не текст в поле."""
+        if self._bridge is None or not self._proxy_check_btn.isEnabled():
+            return
+        self._set_proxy_busy(True)
+        self._set_proxy_status("Проверяю связь с YouTube…")
+        self._bridge.schedule(self._run_proxy_check())
+
+    async def _run_proxy_check(self) -> None:
+        try:
+            _ok, text = await check_youtube()
+        except Exception as exc:  # проверка не должна ронять страницу
+            text = f"Проверка не удалась: {exc}"
+
+        def finish() -> None:
+            self._set_proxy_busy(False)
+            self._set_proxy_status(text)
+
+        if self._bridge is not None:
+            self._bridge.invoke_main(finish)
+
+    def _set_proxy_busy(self, busy: bool) -> None:
+        for widget in (
+            self._proxy_edit,
+            self._proxy_save_btn,
+            self._proxy_check_btn,
+            self._proxy_full_btn,
+        ):
+            widget.setEnabled(not busy)
+
+    def _on_proxy_full_check(self) -> None:
+        if self._bridge is None or not self._proxy_full_btn.isEnabled():
+            return
+        if not self._save_proxy_value():
+            return
+        self._set_proxy_busy(True)
+        self._set_proxy_status("Запускаю полную проверку YouTube…")
+        self._bridge.schedule(self._run_proxy_full_check())
+
+    async def _run_proxy_full_check(self) -> None:
+        def progress(text: str) -> None:
+            self._bridge.invoke_main(lambda: self._set_proxy_status(text))
+
+        try:
+            _ok, text = await check_youtube_full(progress)
+        except Exception:
+            logger.exception("Полная проверка YouTube не завершилась")
+            text = "Проверка не удалась. Подробности в quantis.log."
+
+        def finish() -> None:
+            self._set_proxy_busy(False)
+            self._set_proxy_status(text)
+
+        self._bridge.invoke_main(finish)
+
+    @staticmethod
+    def _begin_group(parent: QVBoxLayout, title: str) -> QVBoxLayout:
+        """Раздел: подпись и карточка, куда _add_row кладёт настройки."""
+        if parent.count() > 2:
+            parent.addSpacing(18)
+        parent.addWidget(QLabel(title, objectName="settingsSectionLabel"))
+        card = QFrame()
+        card.setObjectName("settingsGroup")
+        col = QVBoxLayout(card)
+        col.setContentsMargins(0, 4, 0, 4)
+        col.setSpacing(0)
+        parent.addWidget(card)
+        return col
+
+    @staticmethod
+    def _add_row(group: QVBoxLayout, row: QWidget) -> None:
+        if group.count():
+            line = QFrame()
+            line.setObjectName("settingsDivider")
+            line.setFixedHeight(1)
+            group.addWidget(line)
+        group.addWidget(row)
+
+    def _row(self, title: str, desc: str) -> tuple[QFrame, QVBoxLayout]:
+        frame = QFrame()
+        frame.setObjectName("settingsRow")
+        col = QVBoxLayout(frame)
+        col.setContentsMargins(20, 16, 20, 16)
+        col.setSpacing(6)
+        col.addWidget(QLabel(title, objectName="settingsRowTitle"))
+        description = QLabel(desc, objectName="settingsRowDesc")
+        # Без переноса длинное описание задаёт минимальную ширину всей панели.
+        description.setWordWrap(True)
+        col.addWidget(description)
+        return frame, col
+
+    def _sync_from_preferences(self) -> None:
+        if not self._proxy_edit.hasFocus():
+            self._proxy_edit.setText(self._prefs.youtube_proxy)
+
+        self._wallpaper_enabled_cb.blockSignals(True)
+        self._wallpaper_enabled_cb.setChecked(self._prefs.wallpaper_enabled)
+        self._wallpaper_enabled_cb.blockSignals(False)
+        self._wallpaper_picker.setVisible(self._prefs.wallpaper_enabled)
+
+        self._dynamic_wallpaper_cb.blockSignals(True)
+        self._dynamic_wallpaper_cb.setChecked(self._prefs.dynamic_wallpaper_enabled)
+        self._dynamic_wallpaper_cb.blockSignals(False)
+        self._wallpaper_video_opts.setVisible(self._prefs.dynamic_wallpaper_enabled)
+
+        self._wallpaper_quality_combo.blockSignals(True)
+        quality_index = self._wallpaper_quality_combo.findData(
+            self._prefs.dynamic_wallpaper_quality
+        )
+        if quality_index >= 0:
+            self._wallpaper_quality_combo.setCurrentIndex(quality_index)
+        self._wallpaper_quality_combo.blockSignals(False)
+
+        self._wallpaper_fps_combo.blockSignals(True)
+        fps_index = self._wallpaper_fps_combo.findData(
+            self._prefs.dynamic_wallpaper_fps
+        )
+        if fps_index >= 0:
+            self._wallpaper_fps_combo.setCurrentIndex(fps_index)
+        self._wallpaper_fps_combo.blockSignals(False)
+
+        self._wallpaper_av_delay_spin.blockSignals(True)
+        self._wallpaper_av_delay_spin.setValue(
+            self._prefs.dynamic_wallpaper_av_delay_ms
+        )
+        self._wallpaper_av_delay_spin.blockSignals(False)
+
+        self._eco_cb.blockSignals(True)
+        self._eco_cb.setChecked(self._prefs.background_eco_enabled)
+        self._eco_cb.blockSignals(False)
+
+        self._mini_player_cb.blockSignals(True)
+        self._mini_player_cb.setChecked(self._prefs.mini_player_enabled)
+        self._mini_player_cb.blockSignals(False)
+
+        self._theme_combo.blockSignals(True)
+        index = self._theme_combo.findData(self._prefs.ui_theme)
+        if index >= 0:
+            self._theme_combo.setCurrentIndex(index)
+        self._theme_combo.blockSignals(False)
+
+        self._sync_storage_labels()
+        self._refresh_wallpapers(block_signals=True)
+        self._sync_update_row()
+
+    def _sync_storage_labels(self) -> None:
+        music = app_paths.music_dir()
+        suffix = "" if self._prefs.music_dir else "  ·  по умолчанию"
+        self._music_dir_label.setText(f"{music}{suffix}")
+        self._data_dir_label.setText(str(app_paths.data_dir()))
+
+    def _on_pick_music_dir(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self,
+            "Папка для скачанной музыки",
+            str(app_paths.music_dir()),
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if chosen:
+            self._apply_music_dir(chosen)
+
+    def _on_reset_music_dir(self) -> None:
+        self._apply_music_dir("")
+
+    def _apply_music_dir(self, path: str) -> None:
+        before = self._prefs.music_dir
+        self._prefs.set_music_dir(path)
+        self._sync_storage_labels()
+        if self._prefs.music_dir == before:
+            return
+        # Другая папка — индекс собирается заново (без refresh он не готов,
+        # и download_full ждал бы вечно).
+        from quantis.providers.library_index import LibraryIndex
+
+        index = LibraryIndex.instance()
+        index.reset()
+        if self._bridge is not None:
+            self._bridge.schedule(index.refresh())
+
+    def _set_retag_status(self, text: str, *, busy: bool) -> None:
+        self._retag_status.setText(text)
+        self._retag_status.setVisible(bool(text))
+        self._retag_button.setEnabled(not busy)
+
+    def _on_retag(self) -> None:
+        if self._music is None or self._bridge is None or self._retag_running:
+            return
+        self._retag_running = True
+        self._set_retag_status("Обработано 0", busy=True)
+        self._bridge.schedule(self._run_retag())
+
+    async def _run_retag(self) -> None:
+        from quantis.services import library_retag
+
+        bridge = self._bridge
+
+        def progress(done: int, total: int) -> None:
+            bridge.invoke_main(
+                lambda: self._set_retag_status(
+                    f"Обработано {done} из {total}", busy=True
+                )
+            )
+
+        try:
+            downloader = self._music.downloader
+            report = await library_retag.retag_legacy(
+                downloader, downloader.index, progress
+            )
+            text = (
+                f"Готово: {report.done}, уже были: {report.already}, "
+                f"пропущено: {report.skipped}"
+            )
+        except Exception:
+            logger.exception("Не удалось записать теги в старые файлы")
+            text = "Ошибка: не удалось записать теги"
+
+        def finish() -> None:
+            self._retag_running = False
+            self._set_retag_status(text, busy=False)
+
+        bridge.invoke_main(finish)
+
+    def _on_open_music_dir(self) -> None:
+        self._open_folder(app_paths.music_dir())
+
+    def _on_open_data_dir(self) -> None:
+        self._open_folder(app_paths.data_dir())
+
+    @staticmethod
+    def _open_folder(path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _on_wallpaper_enabled_toggled(self, checked: bool) -> None:
+        self._wallpaper_picker.setVisible(checked)
+        self._prefs.set_wallpaper_enabled(checked)
+        if checked:
+            self._refresh_wallpapers()
+
+    def _on_dynamic_wallpaper_toggled(self, checked: bool) -> None:
+        self._wallpaper_video_opts.setVisible(checked)
+        self._prefs.set_dynamic_wallpaper_enabled(checked)
+
+    def _on_wallpaper_quality_changed(self, index: int) -> None:
+        height = self._wallpaper_quality_combo.itemData(index)
+        if height is not None:
+            self._prefs.set_dynamic_wallpaper_quality(int(height))
+
+    def _on_wallpaper_fps_changed(self, index: int) -> None:
+        fps = self._wallpaper_fps_combo.itemData(index)
+        if fps is not None:
+            self._prefs.set_dynamic_wallpaper_fps(int(fps))
+
+    def _on_wallpaper_av_delay_changed(self, value: int) -> None:
+        self._prefs.set_dynamic_wallpaper_av_delay_ms(int(value))
+
+    def _on_eco_toggled(self, checked: bool) -> None:
+        self._prefs.set_background_eco_enabled(checked)
+
+    def _refresh_wallpapers(self, *, block_signals: bool = False) -> None:
+        if not self._prefs.wallpaper_enabled:
+            self._wallpaper_picker.hide()
+            return
+
+        self._wallpaper_picker.show()
+        if block_signals:
+            self._wallpaper_combo.blockSignals(True)
+
+        current = self._prefs.wallpaper_path
+        self._wallpaper_combo.clear()
+        self._wallpaper_combo.addItem("По умолчанию", "")
+
+        files = scan_wallpapers()
+        for path in files:
+            self._wallpaper_combo.addItem(
+                wallpaper_display_name(path),
+                str(path.resolve()),
+            )
+
+        folder = user_backgrounds_dir()
+        if not files:
+            self._wallpaper_status.setText(f"Пока пусто. Положите jpg/png в:\n{folder}")
+        else:
+            user_count = sum(
+                1 for p in files if str(p.parent.resolve()) == str(folder.resolve())
+            )
+            self._wallpaper_status.setText(
+                f"Найдено: {len(files)} · ваших: {user_count}\nПапка: {folder}"
+            )
+
+        index = self._wallpaper_combo.findData(current)
+        if index < 0 and current:
+            self._wallpaper_combo.addItem(f"⚠ {Path(current).name}", current)
+            index = self._wallpaper_combo.findData(current)
+        self._wallpaper_combo.setCurrentIndex(index if index >= 0 else 0)
+
+        if block_signals:
+            self._wallpaper_combo.blockSignals(False)
+
+    def _on_wallpaper_changed(self, index: int) -> None:
+        path = self._wallpaper_combo.itemData(index)
+        self._prefs.set_wallpaper_path(str(path) if path else "")
+
+    def _on_theme_changed(self, index: int) -> None:
+        theme_id = self._theme_combo.itemData(index)
+        if theme_id:
+            theme_id = str(theme_id)
+            self._prefs.set_ui_theme(theme_id)
+            if (
+                self._prefs.theme.requires_wallpaper
+                and not self._prefs.wallpaper_enabled
+            ):
+                self._prefs.set_wallpaper_enabled(True)
+
+    def _sync_update_row(self) -> None:
+        current = app_version()
+        engine = backend_display_name(resolve_media_backend())
+        self._version_label.setText(f"{current}  ·  {engine}")
+        self._update_startup_cb.blockSignals(True)
+        self._update_startup_cb.setChecked(self._prefs.update_check_on_startup)
+        self._update_startup_cb.blockSignals(False)
+        self.apply_update_from_prefs()
+
+    def apply_update_from_prefs(self) -> None:
+        if self._update_loading:
+            return
+        current = app_version()
+        tag = self._prefs.update_last_tag
+        url = self._prefs.update_last_html_url
+        self._release_url = url if is_safe_release_url(url) else ""
+        if tag and is_newer(current, tag):
+            shown = display_version(tag)
+            self._update_status.setText(f"Доступна {shown}")
+            self._update_open_btn.setEnabled(bool(url))
+        elif self._prefs.update_last_check_at > 0:
+            self._update_status.setText("Актуальная")
+            self._update_open_btn.setEnabled(bool(url))
+        else:
+            self._update_status.setText("Ещё не проверяли")
+            self._update_open_btn.setEnabled(False)
+
+    def set_update_checking(self) -> None:
+        self._update_loading = True
+        self._update_check_btn.setEnabled(False)
+        self._update_status.setText("Проверка…")
+
+    def check_for_update(self) -> None:
+        if self._bridge is None or self._update_loading:
+            return
+        self.set_update_checking()
+        self._bridge.schedule(self._load_update())
+
+    async def _load_update(self) -> None:
+        try:
+            info = await fetch_latest_release()
+        except Exception as exc:
+            if self._bridge is not None:
+                self._bridge.invoke_main(lambda m=str(exc): self._on_update_failed(m))
+            return
+        if self._bridge is not None:
+            self._bridge.invoke_main(lambda i=info: self._on_update_ok(i))
+
+    def _on_update_failed(self, message: str) -> None:
+        self._update_loading = False
+        self._update_check_btn.setEnabled(True)
+        self._update_status.setText(f"Не удалось проверить: {message}")
+
+    def _on_update_ok(self, info: ReleaseInfo | None) -> None:
+        self._update_loading = False
+        self._update_check_btn.setEnabled(True)
+        if info is not None:
+            self._prefs.set_update_last_tag(info.tag)
+            self._prefs.set_update_last_html_url(info.html_url)
+        self._prefs.set_update_last_check_at(time.time())
+        self.apply_update_from_prefs()
+        self.update_checked.emit()
+
+    def _on_update_startup_toggled(self, checked: bool) -> None:
+        self._prefs.set_update_check_on_startup(checked)
+
+    def _on_open_release(self) -> None:
+        if self._release_url and is_safe_release_url(self._release_url):
+            QDesktopServices.openUrl(QUrl(self._release_url))

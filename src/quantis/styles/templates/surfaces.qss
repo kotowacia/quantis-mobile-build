@@ -1,0 +1,26 @@
+QFrame#PlayMenu {
+    background-color: ${panel_bg};
+    border: 1px solid rgba(${ink_rgb}, 0.08);
+    border-radius: ${radius_capsule};
+}
+
+QFrame#TrackListPanel {
+    background-color: ${surface};
+    border: 1px solid rgba(${ink_rgb}, 0.08);
+    border-radius: ${r22};
+}
+
+QFrame#glassPanel {
+    background: ${panel_bg};
+    border: none;
+    border-radius: ${radius};
+}
+
+QFrame#sideNavRail {
+    background: transparent;
+    border: none;
+}
+
+#trackTitle[playing="true"] {
+    color: ${accent_fallback};
+}

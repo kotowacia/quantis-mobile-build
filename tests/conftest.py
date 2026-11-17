@@ -1,0 +1,55 @@
+"""Общие pytest-фикстуры."""
+
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+
+# Виджеты с show() открывали на экране разработчика настоящие окна. Свою
+# платформу можно задать явно: QT_QPA_PLATFORM=wayland pytest.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest
+from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QApplication
+
+# Тесты пишут в QSettings("ReallyFun", "Quantis") — без этого они затирали
+# настоящие настройки (качество фона, FPS, громкость). На Linux и macOS
+# NativeFormat — это ini-файл, и setPath уводит его во временный каталог.
+_SETTINGS_DIR = tempfile.mkdtemp(prefix="quantis-test-settings-")
+for _format in (QSettings.Format.NativeFormat, QSettings.Format.IniFormat):
+    QSettings.setPath(_format, QSettings.Scope.UserScope, _SETTINGS_DIR)
+
+# Буфер стриминга живёт в tempfile.gettempdir()/quantis_stream и чистит там
+# чужие файлы — общий /tmp ломал параллельные прогоны и играющий Quantis.
+tempfile.tempdir = tempfile.mkdtemp(prefix="quantis-test-tmp-")
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    app = QApplication.instance() or QApplication(sys.argv)
+    yield app
+
+
+@pytest.fixture(autouse=True)
+def _fresh_yandex_token_cache():
+    """Токен Яндекса кэшируется в памяти — тесты подменяют keyring по-своему."""
+    from quantis.config.credentials import reset_yandex_token_cache
+
+    reset_yandex_token_cache()
+    yield
+    reset_yandex_token_cache()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_library_index(tmp_path):
+    """Индекс библиотеки не должен читать и писать каталог данных пользователя."""
+    import quantis.models  # noqa: F401  — до providers: providers↔models импортируют друг друга
+    from quantis.providers.library_index import LibraryIndex
+
+    LibraryIndex.reset_instance()
+    LibraryIndex.CACHE_PATH = tmp_path / "library_index_cache" / "library_index.json"
+    yield
+    LibraryIndex.CACHE_PATH = None
+    LibraryIndex.reset_instance()

@@ -1,0 +1,189 @@
+"""pyside6-android-deploy с нашими настройками buildozer.
+
+Инструмент сам пишет buildozer.spec и сразу запускает buildozer, а ключи,
+которые нам нужны, не пробрасывает. Запускаем его скрипт в этом процессе
+и дописываем ключи перед записью spec:
+
+- android.manifest.intent_filters: <meta-data background_running=true>
+  внутрь <activity> — без него Qt останавливает цикл событий в свёрнутом
+  приложении (не включался следующий трек, не работали кнопки плашки);
+- android.add_aars: quantis-media.aar (MediaBridge + служба mediaPlayback)
+  и репозиторий flatDir, через который Gradle его находит.
+
+Запуск: tool-venv/bin/python deploy_android.py <аргументы pyside6-android-deploy>
+Переменная QUANTIS_AAR — путь к собранному AAR.
+"""
+
+from __future__ import annotations
+
+import os
+import runpy
+import shutil
+import sys
+from pathlib import Path
+
+import PySide6
+
+SCRIPTS = Path(PySide6.__file__).parent / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+
+import deploy_lib  # noqa: E402
+from deploy_lib.android import android_config, buildozer  # noqa: E402
+
+HERE = Path(__file__).resolve().parent
+
+EXTRA = {
+    # Метаданные активности: Qt читает background_running оттуда
+    # (QtLoader.getMetaData → ComponentInfo.metaData), а android.meta_data
+    # p4a кладёт в <application>. Файл вставляется в <activity> как есть,
+    # поэтому без комментариев: «--» внутри XML-комментария ломал манифест.
+    "android.manifest.intent_filters": str(HERE / "android" / "activity_meta.xml"),
+    "android.add_aars": os.environ["QUANTIS_AAR"],
+    # p4a кладёт AAR в libs/ и подключает как name:/ext:, а репозитория
+    # flatDir в его шаблоне нет: Gradle писал «Could not find :quantis-media:».
+    "android.add_gradle_repositories": "flatDir { dirs 'libs' }",
+    # Значок: адаптивный (фон + знак, Android 8+) и запасной квадрат.
+    # Исходники SVG и экспорт PNG — в android/icon.
+    "icon.filename": str(HERE / "android" / "icon" / "icon.png"),
+    "icon.adaptive_foreground.filename": str(HERE / "android" / "icon" / "foreground.png"),
+    "icon.adaptive_background.filename": str(HERE / "android" / "icon" / "background.png"),
+    # Лицензии SDK — без вопроса в консоли: в CI отвечать некому.
+    "android.accept_sdk_license": "True",
+    # Создаёт папку для адаптивного значка, которой нет в бутстрапе qt.
+    "p4a.hook": str(HERE / "android" / "p4a_hook.py"),
+    # Служебное для сборки не должно попадать в архив приложения.
+    "source.exclude_dirs": "android,deployment,bin,.buildozer,__pycache__",
+    "source.exclude_patterns": (
+        "deploy_android.py,slim_wheel.py,build_apk.sh,README.md,pysidedeploy.spec,buildozer.spec"
+    ),
+}
+
+_original_update = buildozer.BuildozerConfig.update_config
+
+
+# Загрузчик Qt грузит --qt-libs по порядку, а инструмент собирает их через
+# set(): порядок случайный от сборки к сборке. Когда Multimedia шла раньше
+# Core, её JNI_OnLoad падал (QJniEnvironment::getJniEnv, null) до старта
+# Python. Ставим модули в порядке зависимостей.
+_QT_ORDER = [
+    "Core",
+    "Gui",
+    "Network",
+    "Concurrent",
+    "Widgets",
+    "Svg",
+    "OpenGL",
+    "Qml",
+    "QmlModels",
+    "QmlWorkerScript",
+    "QmlMeta",
+    "Quick",
+    "QuickTemplates2",
+    "QuickControls2",
+    "QuickControls2Impl",
+    "QuickLayouts",
+    "Multimedia",
+    "MultimediaQuick",
+]
+
+
+def _ordered(names: list[str], key) -> list[str]:
+    return sorted(names, key=lambda n: (key(n), n))
+
+
+def _fix_load_order(extra_args: str) -> str:
+    parts = []
+    for part in extra_args.split():
+        if "=" not in part:
+            parts.append(part)
+            continue
+        option, _, value = part.partition("=")
+        names = [n for n in value.split(",") if n]
+        if option == "--qt-libs":
+            names = _ordered(
+                names,
+                lambda n: _QT_ORDER.index(n) if n in _QT_ORDER else len(_QT_ORDER),
+            )
+        elif option == "--load-local-libs":
+            # платформенный плагин — первым: остальным нужен готовый Qt
+            names = _ordered(names, lambda n: 0 if "platforms" in n else 1)
+        parts.append(f"{option}={','.join(names)}")
+    return " ".join(parts)
+
+
+def _update_config(self) -> None:
+    # Шрифты и значки QML-интерфейса: buildozer по умолчанию берёт только
+    # py, png, jpg, kv, atlas (+ qml, js от инструмента).
+    exts = self.get_value("app", "source.include_exts") or ""
+    for ext in ("ttf", "svg", "txt"):
+        if ext not in exts.split(","):
+            exts = f"{exts},{ext}" if exts else ext
+    self.set_value("app", "source.include_exts", exts, raise_warning=False)
+    for key, value in EXTRA.items():
+        self.set_value("app", key, value, raise_warning=False)
+        print(f"[quantis] buildozer {key} = {self.get_value('app', key)}")
+    extra_args = self.get_value("app", "p4a.extra_args") or ""
+    fixed = _fix_load_order(extra_args)
+    self.set_value("app", "p4a.extra_args", fixed, raise_warning=False)
+    print(f"[quantis] buildozer p4a.extra_args = {fixed}")
+    _original_update(self)
+
+
+buildozer.BuildozerConfig.update_config = _update_config
+
+# Плагины форматов изображений: инструмент берёт плагины только из файлов
+# зависимостей Qt, а там их нет. Без них на телефоне «Error decoding» у
+# SVG-значков и JPEG-обложек — интерфейс был без иконок и обложек.
+_EXTRA_PLUGINS = ("imageformats_qsvg", "imageformats_qjpeg", "iconengines_qsvgicon")
+_original_plugins = android_config.AndroidConfig.qt_plugins
+
+
+def _qt_plugins(self) -> list[str]:
+    return sorted(set(_original_plugins.fget(self) or []) | set(_EXTRA_PLUGINS))
+
+
+android_config.AndroidConfig.qt_plugins = property(_qt_plugins, _original_plugins.fset)
+
+
+# Инструмент в начале и в конце удаляет .buildozer — сборку p4a с Python,
+# OpenSSL и dist, и каждая сборка шла с нуля (~6 мин). build_apk.sh делает
+# .buildozer ссылкой на кэш и сам решает, когда его сбросить; здесь чистим
+# только сгенерированное (deployment/ и spec).
+def _cleanup(config, is_android: bool = False) -> None:
+    generated = config.generated_files_path.resolve()
+    if generated.is_relative_to(config.project_dir.resolve()) and generated.exists():
+        shutil.rmtree(generated)  # .buildozer там — ссылка, rmtree её не раскрывает
+    (config.project_dir / "buildozer.spec").unlink(missing_ok=True)
+
+
+deploy_lib.cleanup = _cleanup
+
+# Рецепт PySide6 распаковывает колесо в site-packages и копирует Qt/lib в
+# lib/ APK. Вторая копия библиотек в site-packages не нужна: загрузчик
+# находит их по имени в lib/. Минус ~60 МБ в libpybundle.so.
+_original_create_recipe = android_config.create_recipe
+_RECIPE_TAIL = """
+        info("[quantis] Qt/lib и jar уже в lib/ APK: убираем их из site-packages")
+        shutil.rmtree(lib_dir)
+        shutil.rmtree(lib_dir.parent.parent / "jar", ignore_errors=True)
+"""
+
+
+def _create_recipe(*args, **kwargs) -> None:
+    _original_create_recipe(*args, **kwargs)
+    component = kwargs.get("component", args[1] if len(args) > 1 else "")
+    if not component.startswith("PySide"):
+        return
+    path = Path(kwargs["generated_files_path"]) / "recipes" / component / "__init__.py"
+    text = path.read_text(encoding="utf-8")
+    marker = "\n\nrecipe = PySideRecipe()"
+    if marker not in text:
+        raise RuntimeError(f"[quantis] не нашёл конец build_arch в {path}")
+    path.write_text(text.replace(marker, _RECIPE_TAIL + marker, 1), encoding="utf-8")
+
+
+android_config.create_recipe = _create_recipe
+
+script = SCRIPTS / "android_deploy.py"
+sys.argv = [str(script), *sys.argv[1:]]
+runpy.run_path(str(script), run_name="__main__")

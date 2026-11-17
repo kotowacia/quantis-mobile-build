@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+import math
+import random
+
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QBrush, QLinearGradient, QPainter, QPaintEvent, QPixmap
+from PySide6.QtWidgets import QSlider, QStyle, QStyleOptionSlider, QWidget
+
+from quantis.ui.corners import corner
+from quantis.ui.cover_accent import CoverPalette
+from quantis.ui.live_palette import LivePalette
+from quantis.ui.preferences import UiPreferences
+from quantis.ui.themes.spec import qcolor
+
+
+class WaveformSeekSlider(QSlider):
+    """Перемотка по «форме волны»: сыгранное — градиентом цветов трека
+    (``accent2 → accent``), остальное — полупрозрачными «чернилами» темы.
+
+    Пока нет настоящей огибающей трека, форма волны своя у каждого трека
+    (зерно — ключ трека), чтобы треки не выглядели одинаково.
+    """
+
+    STEP, BAR = 4, 2.4
+
+    def __init__(
+        self,
+        orientation: Qt.Orientation = Qt.Orientation.Horizontal,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(orientation, parent)
+        self.setObjectName("waveformSeek")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._palette = LivePalette.instance().current
+        self._peaks: list[float] = []
+        self._cache = QPixmap()
+        self._cache_key: tuple[object, ...] | None = None
+        self._prefs = UiPreferences()
+        self._prefs.theme_changed.connect(self._on_theme)
+        self._on_theme()
+        self.set_seed("")
+        LivePalette.instance().palette_changed.connect(self._on_palette)
+
+    def _on_theme(self) -> None:
+        colors = self._prefs.theme.colors
+        self._rest = qcolor(colors.ink_rgb)
+        self._rest.setAlpha(52)
+        self._handle = qcolor(colors.handle)
+        self.update()
+
+    @property
+    def is_idle(self) -> bool:
+        """Трека нет: вместо формы волны — ровная линия без ползунка."""
+        return self._idle
+
+    def set_seed(self, key: str) -> None:
+        self._idle = not key
+        if self._idle:
+            self._peaks = [0.0] * 400
+            self._cache_key = None
+            self.update()
+            return
+        rnd = random.Random(key)
+        raw = [rnd.random() for _ in range(400)]
+        smooth = []
+        for i in range(len(raw)):
+            window = raw[max(0, i - 2) : i + 3]
+            smooth.append(sum(window) / len(window))
+        self._peaks = [
+            0.18
+            + 0.82
+            * math.pow(v, 1.4)
+            * (0.55 + 0.45 * math.sin(i / 400 * math.pi * 3 + 1) ** 2)
+            for i, v in enumerate(smooth)
+        ]
+        self.update()
+
+    def _on_palette(self, palette: CoverPalette) -> None:
+        self._palette = palette
+        if self.isVisible():
+            self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        opt = QStyleOptionSlider()
+        self.initStyleOption(opt)
+        groove = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            opt,
+            QStyle.SubControl.SC_SliderGroove,
+            self,
+        )
+        if groove.width() <= 0:
+            groove = self.rect()
+        span = max(1, self.maximum() - self.minimum())
+        progress = (self.value() - self.minimum()) / span if self.maximum() > 0 else 0.0
+        left, width = groove.left(), groove.width()
+        dpr = self.devicePixelRatioF()
+        head = round((left + width * progress) * dpr) / dpr
+        # Кадры фона перерисовывают ползунок 30 раз в секунду, а позиция
+        # меняется реже — ~140 полосок рисуем, только когда сдвинулась голова.
+        key = (
+            self.width(),
+            self.height(),
+            dpr,
+            left,
+            width,
+            head,
+            id(self._peaks),
+            self._idle,
+            self._palette.accent.rgba(),
+            self._palette.accent2.rgba(),
+            self._rest.rgba(),
+            self._handle.rgba(),
+        )
+        if self._cache_key != key:
+            pixmap = QPixmap(round(self.width() * dpr), round(self.height() * dpr))
+            pixmap.setDevicePixelRatio(dpr)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            self._paint_bars(painter, left, width, head)
+            painter.end()
+            self._cache, self._cache_key = pixmap, key
+        painter = QPainter(self)
+        painter.drawPixmap(0, 0, self._cache)
+        painter.end()
+
+    def _paint_bars(
+        self, painter: QPainter, left: int, width: int, head: float
+    ) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        h = self.height()
+        gradient = QLinearGradient(left, 0, max(left + 1.0, head), 0)
+        gradient.setColorAt(0, self._palette.accent2)
+        gradient.setColorAt(1, self._palette.accent)
+        played, rest = QBrush(gradient), QBrush(self._rest)
+        count = max(1, int(width // self.STEP))
+        for i in range(count):
+            peak = self._peaks[int(i / count * len(self._peaks))]
+            bar_h = max(2.0, (h - 4) * peak)
+            x = left + i * self.STEP
+            painter.setBrush(played if x < head else rest)
+            painter.drawRoundedRect(
+                QRectF(x, (h - bar_h) / 2, self.BAR, bar_h), corner(1.2), corner(1.2)
+            )
+        if self._idle:
+            return
+        painter.setBrush(self._handle)
+        painter.drawRoundedRect(QRectF(head - 1, 0, 2, h), corner(1), corner(1))

@@ -1,0 +1,318 @@
+// Медиатека: Любимое, История, медиатека Яндекса («Мне нравится» и свои
+// плейлисты, если выполнен вход); шестерёнка в шапке — настройки.
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Controls.Material
+import QtQuick.Layouts
+
+StackView {
+    id: stack
+    initialItem: root
+    // Вкладку открыли — медиатеку Яндекса обновить (не чаще раза в 5 минут).
+    onVisibleChanged: if (visible && app.loggedIn) app.refreshYandexLibrary()
+
+    function openAccount() {
+        if (stack.depth === 1)
+            stack.push(accountPage)
+    }
+    function openLiked() {
+        if (stack.depth === 1)
+            stack.push(likedPage)
+    }
+    function openYandexLiked() {
+        if (stack.depth === 1)
+            stack.push(yandexLikedPage)
+    }
+
+    Component {
+        id: accountPage
+        AccountPage { onBack: stack.pop() }
+    }
+    Component {
+        id: settingsPage
+        SettingsPage {
+            onBack: stack.pop()
+            onOpenAccount: stack.push(accountPage)
+        }
+    }
+    function openSettings() {
+        if (stack.depth === 1)
+            stack.push(settingsPage)
+    }
+    Component {
+        id: likedPage
+        TrackListPage {
+            title: "Любимое"
+            listName: "liked"
+            model: app.liked
+            emptyText: "Нажми «♡» в плеере или в меню трека — он появится здесь"
+            onBack: stack.pop()
+        }
+    }
+    Component {
+        id: yandexLikedPage
+        TrackListPage {
+            title: "Мне нравится"
+            listName: "yandexLiked"
+            model: app.yandexLiked
+            loading: app.yandexLibraryLoading
+            emptyText: "В «Мне нравится» на Яндексе пока пусто"
+            onBack: stack.pop()
+        }
+    }
+    Component {
+        id: playlistPage
+        TrackListPage {
+            listName: "remote"
+            model: app.remote
+            loading: app.remoteLoading
+            errorText: app.remoteError
+            emptyText: "В плейлисте нет доступных треков"
+            onBack: stack.pop()
+        }
+    }
+    function openPlaylist(item) {
+        if (stack.depth !== 1)
+            return
+        app.openPlaylist(item.uid, item.kind)
+        stack.push(playlistPage, { title: item.title })
+    }
+    Component {
+        id: downloadedPage
+        TrackListPage {
+            title: "Скачанное"
+            listName: "downloaded"
+            model: app.downloaded
+            actionText: app.downloadsPending > 1 ? "Остановить" : ""
+            onAction: app.cancelDownloads()
+            emptyText: "Скачай трек в меню «⋮» или весь список кнопкой со стрелкой — он будет играть без сети"
+            onBack: stack.pop()
+        }
+    }
+    Component {
+        id: localPlaylistPage
+        TrackListPage {
+            id: localPage
+            title: app.playlistName
+            listName: "playlist"
+            model: app.playlist
+            emptyText: "Добавь треки через меню «⋮» → «В плейлист»"
+            actionText: "Плейлист: переименовать или удалить"
+            actionIcon: "more-vertical"
+            onAction: editMenu.popup()
+            onBack: stack.pop()
+            property string playlistId
+            Menu {
+                id: editMenu
+                background: Rectangle { implicitWidth: 220; radius: 14; color: theme.surfaceHigh; border.color: theme.stroke }
+                MenuItem { text: "Переименовать"; onTriggered: playlistDialog.openRename(localPage.playlistId, app.playlistName) }
+                MenuItem { text: "Удалить плейлист"; onTriggered: playlistDialog.openDelete(localPage.playlistId, app.playlistName) }
+            }
+            Connections {
+                target: playlistDialog
+                function onDeleted() { if (stack.depth > 1) stack.pop() }
+            }
+        }
+    }
+    function openLocalPlaylist(id) {
+        if (stack.depth !== 1)
+            return
+        app.openLocalPlaylist(id)
+        stack.push(localPlaylistPage, { playlistId: id })
+    }
+    Component {
+        id: historyPage
+        TrackListPage {
+            title: "История"
+            listName: "history"
+            model: app.history
+            emptyText: "Здесь будет то, что ты слушал"
+            onBack: stack.pop()
+        }
+    }
+
+    // Строка медиатеки: значок, название, подпись, стрелка.
+    component LibraryRow: ItemDelegate {
+        id: entry
+        property string iconName
+        property string caption
+        property string hint
+        property color hintColor: theme.textDim
+        property string cover: "" // url-encoded https — обложка вместо значка
+        Layout.fillWidth: true
+        Layout.leftMargin: theme.gutter - 4
+        Layout.rightMargin: theme.gutter - 4
+        height: 72
+        Accessible.name: caption
+        background: Rectangle {
+            radius: theme.radius
+            color: entry.down ? theme.surfaceHigh : theme.surface
+            Behavior on color { ColorAnimation { duration: theme.fast } }
+        }
+        contentItem: RowLayout {
+            spacing: 14
+            CoverArt {
+                visible: entry.cover !== ""
+                Layout.preferredWidth: 44; Layout.preferredHeight: 44
+                seed: entry.caption
+                cover: entry.cover
+            }
+            Rectangle {
+                visible: entry.cover === ""
+                Layout.preferredWidth: 44; Layout.preferredHeight: 44
+                radius: 22
+                color: theme.surfaceHigh
+                Image {
+                    anchors.centerIn: parent
+                    source: "icons/" + entry.iconName + ".svg"
+                    sourceSize: Qt.size(22, 22)
+                    Accessible.ignored: true
+                }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 2
+                Text {
+                    text: entry.caption
+                    color: theme.text
+                    font.family: theme.ui
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: entry.hint
+                    color: entry.hintColor
+                    font.family: theme.ui
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                }
+            }
+            Image {
+                source: "icons/chevron-right.svg"
+                sourceSize: Qt.size(20, 20)
+                opacity: 0.5
+                Accessible.ignored: true
+            }
+        }
+    }
+
+    function tracksLabel(n) {
+        var tail = n % 10, tens = n % 100
+        var word = (tail === 1 && tens !== 11) ? "трек"
+                 : (tail >= 2 && tail <= 4 && (tens < 12 || tens > 14)) ? "трека" : "треков"
+        return n + " " + word
+    }
+
+    // Подзаголовок раздела.
+    component SectionLabel: Text {
+        Layout.leftMargin: theme.gutter
+        Layout.topMargin: 14
+        color: theme.textDim
+        font.family: theme.ui
+        font.pixelSize: 13
+        font.weight: Font.DemiBold
+        font.capitalization: Font.AllUppercase
+        font.letterSpacing: 0.8
+    }
+
+    Flickable {
+        id: root
+        contentHeight: column.implicitHeight + 24
+        // Только вертикаль: без contentWidth ширину считали по детям, и шире
+        // экрана (аврора, тени) страница ловила горизонтальный жест вместо прокрутки.
+        contentWidth: width
+        flickableDirection: Flickable.VerticalFlick
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollIndicator.vertical: ScrollIndicator {}
+        ColumnLayout {
+            id: column
+            width: root.width
+            spacing: 10
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: theme.gutter
+                Layout.rightMargin: theme.gutter - 12
+                Layout.topMargin: 12
+                Text {
+                    Layout.fillWidth: true
+                    text: "Медиатека"
+                    color: theme.text
+                    font.family: theme.display
+                    font.pixelSize: 26
+                    font.weight: Font.DemiBold
+                }
+                IconButton {
+                    iconName: "settings"
+                    label: "Настройки"
+                    onClicked: stack.openSettings()
+                }
+            }
+            LibraryRow {
+                iconName: "heart"
+                caption: "Любимое"
+                hint: stack.tracksLabel(app.liked.count)
+                onClicked: stack.push(likedPage)
+            }
+            LibraryRow {
+                iconName: "list-music"
+                caption: "История"
+                hint: stack.tracksLabel(app.history.count)
+                onClicked: stack.push(historyPage)
+            }
+            LibraryRow {
+                iconName: "download"
+                caption: "Скачанное"
+                hint: app.downloadsPending > 0
+                    ? "Скачиваем: " + app.downloadingTitle + " · осталось " + app.downloadsPending
+                    : stack.tracksLabel(app.downloaded.count)
+                      + (app.downloaded.count > 0 ? " · " + app.offlineSize : "")
+                onClicked: stack.push(downloadedPage)
+            }
+            SectionLabel { text: "Мои плейлисты" }
+            Repeater {
+                model: app.localPlaylists
+                LibraryRow {
+                    required property var modelData
+                    iconName: "list-music"
+                    caption: modelData.name
+                    hint: stack.tracksLabel(modelData.count)
+                    cover: modelData.cover
+                    onClicked: stack.openLocalPlaylist(modelData.id)
+                }
+            }
+            LibraryRow {
+                iconName: "list-plus"
+                caption: "Новый плейлист"
+                hint: "Собери свой из треков Яндекса и YouTube"
+                onClicked: playlistDialog.openCreate("", -1)
+            }
+            SectionLabel {
+                visible: app.loggedIn
+                text: "Яндекс Музыка"
+            }
+            LibraryRow {
+                visible: app.loggedIn
+                iconName: "heart-filled"
+                caption: "Мне нравится"
+                hint: app.yandexLiked.count > 0 ? stack.tracksLabel(app.yandexLiked.count)
+                    : (app.yandexLibraryLoading ? "Загружаем…" : "Пусто")
+                onClicked: stack.openYandexLiked()
+            }
+            Repeater {
+                model: app.loggedIn ? app.yandexPlaylists : []
+                LibraryRow {
+                    required property var modelData
+                    iconName: "list-music"
+                    caption: modelData.title
+                    hint: stack.tracksLabel(modelData.count)
+                          + (modelData.owner ? " · " + modelData.owner : "")
+                    cover: modelData.cover ? encodeURIComponent(modelData.cover) : ""
+                    onClicked: stack.openPlaylist(modelData)
+                }
+            }
+        }
+    }
+}

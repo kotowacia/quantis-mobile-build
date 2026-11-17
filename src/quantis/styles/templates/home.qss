@@ -1,0 +1,437 @@
+QWidget#homePage,
+QWidget#homeScrollContent,
+QWidget#libraryPage {
+    background: transparent;
+}
+
+QScrollArea#homeScroll {
+    background: transparent;
+    border: none;
+}
+
+QWidget#playlistShelf,
+QWidget#quickPickShelf,
+QWidget#playlistShelfHost,
+QWidget#quickPickShelfHost {
+    background: transparent;
+}
+
+QLabel#homeGreetingSub {
+    font-size: 14px;
+    font-weight: 400;
+    color: rgba(${mist_rgb}, 0.55);
+    letter-spacing: 0.15px;
+    padding: 0 0 8px 0;
+    background: transparent;
+}
+
+QWidget#homeSection,
+QWidget#homeSectionBody {
+    background: transparent;
+}
+
+QLabel#homeSectionTitle {
+    font-size: 20px;
+    font-weight: 800;
+    color: ${title};
+    letter-spacing: -0.45px;
+    background: transparent;
+    font-family: ${font_display};
+}
+
+QLabel#homeSectionSubtitle {
+    font-size: 12px;
+    color: rgba(${mist_rgb}, 0.45);
+    background: transparent;
+    font-family: ${font_label};
+}
+
+QLabel#homeSectionBadge {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: rgba(${mist_rgb}, 0.75);
+    background: rgba(${ink_rgb}, 0.05);
+    border: 1px solid rgba(${ink_rgb}, 0.08);
+    border-radius: ${r8};
+    min-width: 20px;
+    padding: 2px 8px;
+    max-height: 20px;
+}
+
+QLabel#homePillBadge {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.25px;
+    color: rgba(${mist_rgb}, 0.82);
+    background: rgba(${ink_rgb}, 0.05);
+    border: 1px solid rgba(${ink_rgb}, 0.08);
+    border-radius: ${r8};
+    padding: 2px 8px;
+    max-height: 20px;
+}
+
+QLabel#homePillBadge[variant="wave"] {
+    color: rgba(125, 211, 252, 0.95);
+    background: rgba(${hl_rgb}, 0.07);
+    border-color: rgba(${hl_rgb}, 0.2);
+}
+
+QLabel#homePillBadge[variant="continue"] {
+    color: rgba(253, 186, 210, 0.95);
+    background: rgba(255, 92, 122, 0.08);
+    border-color: rgba(255, 92, 122, 0.22);
+}
+
+QLabel#homeEmptyHint {
+    font-size: 13px;
+    /* 0.4 давало контраст ниже 4.5:1 на тёмном и светлом фоне. */
+    color: rgba(${mist_rgb}, 0.7);
+    padding: 16px 4px;
+    background: transparent;
+}
+
+QFrame#playlistCard {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+QFrame#playlistCard[hovered="true"] QLabel#playlistCardTitle {
+    color: rgb(${hl_rgb});
+}
+
+QLabel#playlistCardTitle {
+    font-size: 13px;
+    font-weight: 650;
+    color: ${title};
+    background: transparent;
+    padding: 2px 2px 0 2px;
+}
+
+QFrame#quickPickTile {
+    background: transparent;
+    border: none;
+    border-radius: ${r14};
+}
+
+QLabel#quickPickTitle {
+    font-size: 13px;
+    font-weight: 650;
+    color: ${title};
+    background: transparent;
+}
+
+/* Действия у заголовка раздела («Все», «Слушать») — ссылки, не кнопки */
+QToolButton#homeSectionAction {
+    background: transparent;
+    border: none;
+    border-radius: ${r8};
+    padding: 6px 8px;
+    color: ${text_meta};
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QToolButton#homeSectionAction:hover {
+    background: rgba(${ink_rgb}, 0.06);
+    color: ${title};
+}
+
+QTableView#homeTrackList {
+    background: transparent;
+    border: none;
+    outline: none;
+}
+
+QTableView#homeTrackList::item {
+    border: none;
+    padding: 0;
+    background: transparent;
+}
+
+QTableView#homeTrackList::item:selected {
+    background: transparent;
+}
+
+QTableView#homeTrackList QScrollBar:vertical,
+QTableView#homeTrackList QScrollBar:horizontal {
+    width: 0;
+    height: 0;
+    background: transparent;
+}
+
+
+/* Сцена «Сейчас играет» */
+QLabel#stageKicker {
+    color: rgb(${hl_rgb});
+    font-size: 13px;
+    font-weight: 700;
+    background: transparent;
+}
+
+QLabel#stageTitle {
+    color: ${title};
+    font-family: ${font_display};
+    font-size: 38px;
+    font-weight: 800;
+    background: transparent;
+}
+
+QLabel#stageTitle[compact="true"] {
+    font-size: 30px;
+}
+
+QLabel#stageArtist {
+    color: ${text_soft};
+    font-size: 15px;
+    font-weight: 500;
+    background: transparent;
+}
+
+QLabel#stageMeta {
+    color: ${text_meta};
+    font-size: 13px;
+    background: transparent;
+}
+
+QPushButton#stagePill {
+    color: ${text};
+    font-size: 13px;
+    font-weight: 600;
+    background: rgba(${ink_rgb}, 0.08);
+    border: 1px solid rgba(${ink_rgb}, 0.16);
+    border-radius: ${r16};
+    min-height: 30px;
+    padding: 0 16px;
+}
+
+QPushButton#stagePill:hover {
+    background: rgba(${ink_rgb}, 0.14);
+}
+
+/* «Моя волна» — первая плитка быстрого доступа */
+QLabel#quickPickSubtitle {
+    color: ${text_dim};
+    font-size: 12px;
+    background: transparent;
+}
+
+QToolButton#waveQuickPlay {
+    color: ${on_tint};
+    background: ${tint};
+    border: none;
+    border-radius: ${r18};
+    font-size: 13px;
+}
+
+QToolButton#waveQuickPlay:hover {
+    background: ${tint_hover};
+}
+
+QToolButton#waveQuickPlay:disabled {
+    background: rgba(${ink_rgb}, 0.1);
+    color: rgba(${ink_rgb}, 0.35);
+}
+
+QScrollArea#ribbonScroll,
+QWidget#ribbonRow {
+    background: transparent;
+}
+
+QToolButton#waveMoodChip {
+    background: ${chip_bg};
+    border: 1px solid rgba(${ink_rgb}, 0.10);
+    border-radius: ${r15};
+    color: ${text_soft};
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QToolButton#ribbonArrow {
+    background: ${chip_bg};
+    border: 1px solid rgba(${ink_rgb}, 0.16);
+    border-radius: ${r14};
+}
+
+QToolButton#ribbonArrow:hover {
+    border-color: rgba(${tint_rgb}, 0.6);
+}
+
+QToolButton#waveMoodChip[control="true"] {
+    border-color: rgba(${tint_rgb}, 0.45);
+    color: ${title};
+}
+
+QToolButton#waveMoodChip:hover {
+    background: rgba(${hl_rgb}, 0.14);
+    border-color: rgba(${hl_rgb}, 0.55);
+    color: ${title};
+}
+
+QToolButton#waveMoodChip:checked {
+    background: rgba(${tint_rgb}, 0.26);
+    border-color: rgba(${tint_rgb}, 0.60);
+    color: ${title};
+}
+
+QToolButton#waveMoodChip:disabled {
+    color: rgba(${ink_rgb}, 0.35);
+}
+
+QScrollArea#waveScroll,
+QWidget#waveScrollContent {
+    background: transparent;
+}
+
+QToolButton#waveHeroPlay {
+    background: rgb(${tint_rgb});
+    border: none;
+    border-radius: ${r20};
+    padding: 10px 22px;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QToolButton#waveHeroPlay:hover {
+    background: rgba(${tint_rgb}, 0.85);
+}
+
+QToolButton#waveHeroAction {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: ${r20};
+    padding: 10px 18px;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QToolButton#waveHeroAction:hover {
+    background: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+QToolButton#waveHeroPlay:disabled,
+QToolButton#waveHeroAction:disabled {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+QLabel#wavePanelCaption {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+}
+
+QLabel#wavePanelTitle {
+    background: transparent;
+    color: #ffffff;
+}
+
+QLabel#wavePanelSubtitle {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 13px;
+}
+
+QLabel#wavePanelHint {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px dashed rgba(255, 255, 255, 0.16);
+    border-radius: ${r14};
+    padding: 10px 12px;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 12px;
+}
+
+/* Карточка «Моя волна» справа от сцены главной */
+QWidget#homeWaveCard {
+    background: transparent;
+}
+
+QLabel#homeWaveKicker {
+    color: ${tint};
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.6px;
+    background: transparent;
+}
+
+QLabel#homeWaveTitle {
+    color: ${title};
+    font-family: ${font_display};
+    font-size: 21px;
+    font-weight: 700;
+    background: transparent;
+}
+
+QLabel#homeWaveStatus {
+    color: ${text_soft};
+    font-size: 12px;
+    background: transparent;
+}
+
+QToolButton#homeWavePlay {
+    background: rgb(${tint_rgb});
+    border: none;
+    border-radius: ${r18};
+    padding: 9px 20px;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QToolButton#homeWavePlay:hover {
+    background: rgba(${tint_rgb}, 0.85);
+}
+
+QToolButton#homeWavePlay:disabled {
+    background: rgba(${tint_rgb}, 0.4);
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* Заголовок страницы (ui/views/widgets/page_layout.py) */
+QWidget#pageTitleBlock {
+    background: transparent;
+}
+
+QLabel#pageTitle {
+    color: ${title};
+    font-family: ${font_display};
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    background: transparent;
+}
+
+QLabel#pageSubtitle {
+    color: ${text_meta};
+    font-size: 13px;
+    background: transparent;
+}
+
+/* Пустое состояние страницы: заголовок, пояснение, кнопка */
+QLabel#emptyStateTitle {
+    color: ${title};
+    font-size: 17px;
+    font-weight: 700;
+    background: transparent;
+}
+
+QLabel#emptyStateText {
+    color: ${text_dim};
+    font-size: 13px;
+    background: transparent;
+}
+
+QWidget#emptyState {
+    background: transparent;
+}
+
+QLabel#emptyStateIcon {
+    background: rgba(${ink_rgb}, 0.06);
+    border-radius: ${r32};
+}

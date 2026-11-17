@@ -1,0 +1,69 @@
+QWidget#playlistPage {
+    background: transparent;
+}
+
+/* Кнопки на арте подборки: светлая «таблетка» и полупрозрачная рядом. */
+#heroPlay {
+    color: ${bg};
+    font-size: 14px;
+    font-weight: 700;
+    background: rgb(${ink_rgb});
+    border: none;
+    border-radius: ${r22};
+    padding: 0 28px;
+    min-width: 96px;
+}
+
+#heroPlay:hover {
+    background: rgba(${ink_rgb}, 0.86);
+}
+
+#heroGhost,
+#playlistSort {
+    color: rgb(${ink_rgb});
+    font-size: 14px;
+    font-weight: 600;
+    background: rgba(${ink_rgb}, 0.1);
+    border: 1px solid rgba(${ink_rgb}, 0.12);
+    border-radius: ${r22};
+    padding: 0 24px;
+    min-width: 116px;
+}
+
+#heroGhost:hover,
+#playlistSort:hover {
+    background: rgba(${ink_rgb}, 0.18);
+}
+
+QTableView#trackListView {
+    background: transparent;
+    selection-background-color: transparent;
+    border: none;
+    outline: none;
+}
+
+QTableView#trackListView::item {
+    border: none;
+    padding: 0;
+}
+
+QTableView#trackListView::item:selected {
+    background: transparent;
+}
+
+QTableView#trackListView QScrollBar:vertical {
+    width: 5px;
+    background: transparent;
+    margin: 4px 0;
+}
+
+QTableView#trackListView QScrollBar::handle:vertical {
+    background: rgba(${ink_rgb}, 0.2);
+    border-radius: ${r3};
+    min-height: 40px;
+}
+
+QTableView#trackListView QScrollBar::add-line:vertical,
+QTableView#trackListView QScrollBar::sub-line:vertical {
+    height: 0;
+}

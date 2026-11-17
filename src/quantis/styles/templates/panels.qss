@@ -1,0 +1,180 @@
+QToolButton#sourceFilterChip {
+    background: ${chip_bg};
+    border: 1px solid rgba(${ink_rgb}, 0.08);
+    border-radius: ${r14};
+    color: rgba(${ink_rgb}, 0.6);
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QToolButton#sourceFilterChip:hover {
+    background: rgba(${ink_rgb}, 0.07);
+}
+
+QToolButton#sourceFilterChip:checked {
+    background: rgba(${tint_rgb}, 0.26);
+    border-color: rgba(${tint_rgb}, 0.55);
+    color: rgb(${ink_rgb});
+}
+
+/* Правая выдвижная панель «Очередь» */
+QFrame#sidePanel {
+    background: ${panel_bg};
+    border: 1px solid rgba(${ink_rgb}, 0.06);
+    border-radius: ${radius};
+}
+
+QLabel#sidePanelTitle {
+    color: ${title};
+    font-size: 16px;
+    font-weight: 700;
+    background: transparent;
+}
+
+QLabel#sidePanelEyebrow {
+    color: ${text_meta};
+    font-size: 12px;
+    font-weight: 700;
+    background: transparent;
+}
+
+QFrame#sidePanelNow {
+    background: rgba(${ink_rgb}, 0.06);
+    border: none;
+    border-radius: ${r12};
+}
+
+QLabel#sidePanelNowTitle {
+    color: ${text};
+    font-size: 14px;
+    font-weight: 700;
+    background: transparent;
+}
+
+QLabel#sidePanelNowArtist {
+    color: ${text_dim};
+    font-size: 12px;
+    background: transparent;
+}
+
+QToolButton#sidePanelTool,
+QToolButton#headerNavToggle {
+    background: transparent;
+    border: none;
+    border-radius: ${r10};
+}
+
+QToolButton#sidePanelTool:hover,
+QToolButton#headerNavToggle:hover {
+    background: rgba(${ink_rgb}, 0.08);
+}
+
+QLineEdit#headerSearch {
+    background: ${field_bg};
+    border: 1px solid transparent;
+    border-radius: ${r17};
+    color: ${text};
+    padding: 0 12px 0 4px;
+    font-size: 13px;
+    selection-background-color: rgba(${tint_rgb}, 0.4);
+}
+
+QLineEdit#headerSearch:focus {
+    border-color: rgba(${tint_rgb}, 0.55);
+}
+
+#controlButton:checked {
+    background: rgba(${tint_rgb}, 0.2);
+}
+
+#nowPlayingTitle {
+    color: ${text};
+    font-size: 16px;
+    font-weight: 700;
+    font-family: ${font_display};
+}
+
+#nowPlayingArtist {
+    color: ${text_dim};
+    font-size: 13px;
+}
+
+#nowPlayingSourceBtn,
+#nowPlayingStubBtn {
+    background: rgba(${ink_rgb}, 0.05);
+    border: 1px solid rgba(${ink_rgb}, 0.08);
+    border-radius: ${r12};
+    color: ${text};
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#nowPlayingSourceBtn:hover,
+#nowPlayingStubBtn:hover {
+    background: rgba(${tint_rgb}, 0.2);
+}
+
+QFrame#pluginCard {
+    background: ${surface};
+    border: 1px solid rgba(${ink_rgb}, 0.06);
+    border-radius: ${r16};
+}
+
+#pluginCardTitle {
+    color: ${text};
+    font-size: 14px;
+    font-weight: 700;
+}
+
+#pluginCardAuthor {
+    color: ${text_dim};
+    font-size: 12px;
+}
+
+#pluginCardDesc {
+    color: rgba(${ink_rgb}, 0.55);
+    font-size: 12px;
+}
+
+QToolButton#advancedToggle {
+    background: transparent;
+    border: 1px solid rgba(${ink_rgb}, 0.1);
+    border-radius: ${r14};
+    color: rgba(${ink_rgb}, 0.6);
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QToolButton#advancedToggle:hover {
+    background: rgba(${ink_rgb}, 0.08);
+    color: rgba(${ink_rgb}, 0.95);
+}
+
+QToolButton#advancedToggle:checked {
+    background: rgba(${tint_rgb}, 0.26);
+    border-color: rgba(${tint_rgb}, 0.55);
+    color: rgb(${ink_rgb});
+}
+
+QToolButton#sidePanelTab {
+    background: transparent;
+    border: none;
+    border-radius: ${r16};
+    color: ${text_dim};
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+}
+
+QToolButton#sidePanelTab:hover {
+    color: ${text};
+    background: rgba(${ink_rgb}, 0.06);
+}
+
+QToolButton#sidePanelTab:checked {
+    color: ${text};
+    background: rgba(${tint_rgb}, 0.2);
+}

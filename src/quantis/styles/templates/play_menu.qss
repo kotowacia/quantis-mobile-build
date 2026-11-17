@@ -1,0 +1,36 @@
+QWidget#playerLeft,
+QWidget#playerCenter,
+QWidget#playerRight {
+    background: transparent;
+}
+
+#controlButton[accent=true] {
+    padding: 0;
+    margin: 0;
+    background: ${accent_fallback};
+    border-radius: ${r20};
+    color: ${on_tint};
+}
+
+#controlButton[compact="true"] {
+    border-radius: ${r16};
+}
+
+#PlayMenu QLabel {
+    background: transparent;
+}
+
+#repeatButton[repeatMode="track"] {
+    background: rgba(${tint_rgb}, 0.2);
+}
+
+/* Высота — только PlayerBar.setFixedHeight: min-height здесь её перебивал,
+   и док сжимался на страницах с длинным содержимым. */
+#playerDock {
+    background: transparent;
+    border: none;
+}
+
+#controlButton[accent=true]:hover {
+    background: rgba(${accent_fallback_rgb}, 102);
+}

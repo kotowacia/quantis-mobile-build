@@ -1,0 +1,48 @@
+QToolButton#navIconButton {
+    background: transparent;
+    border: none;
+    border-radius: ${r12};
+    padding: 10px 14px;
+    color: ${text_dim};
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+}
+
+QToolButton#navIconButton:hover {
+    background: rgba(${ink_rgb}, 0.07);
+    color: rgb(${ink_rgb});
+}
+
+QToolButton#navIconButton:checked {
+    /* подложку выбранного пункта рисует меню — цветом обложки */
+    background: transparent;
+    color: rgb(${ink_rgb});
+}
+
+QToolButton#navIconButton:pressed {
+    background: rgba(${tint_rgb}, 0.2);
+}
+
+QLabel#navSectionLabel {
+    color: ${text_meta};
+    font-size: 12px;
+    font-weight: 600;
+    padding: 14px 14px 4px 14px;
+    background: transparent;
+}
+
+QFrame#navDivider {
+    background: rgba(${ink_rgb}, 0.08);
+    border: none;
+    margin: 0 16px;
+}
+
+QLabel#navBadge {
+    background: rgb(${hl_rgb});
+    color: #FFFFFF;
+    border-radius: ${r9};
+    font-size: 11px;
+    font-weight: 700;
+    padding: 0 5px;
+}
