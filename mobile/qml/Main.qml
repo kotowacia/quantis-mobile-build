@@ -129,6 +129,13 @@ ApplicationWindow {
             onOpen: player.open()
         }
 
+        property int pendingTab: -1
+        Timer {
+            id: navDelay
+            interval: 140
+            repeat: false
+            onTriggered: nav.navSelected(nav.pendingTab)
+        }
         BottomNav {
             id: nav
             anchors.left: parent.left
@@ -137,6 +144,20 @@ ApplicationWindow {
             current: window.tab
             // Касание открытой вкладки — к её началу.
             onSelected: function (index) {
+                // Если открыта клавиатура поиска, она перехватывает тапы по
+                // нижней панели: прячем её первой.
+                if (Qt.inputMethod.visible) {
+                    Qt.inputMethod.hide()
+                    // Сворачивание IME и переключение вкладки в одном событии
+                    // оставляют окно без перерисовки (виден только фон):
+                    // даём Qt время перерисовать сцену до смены вкладки.
+                    nav.pendingTab = index
+                    navDelay.start()
+                    return
+                }
+                nav.navSelected(index)
+            }
+            function navSelected(index) {
                 if (index === window.tab && window.currentStack().depth > 1)
                     window.currentStack().pop(null)
                 window.tab = index

@@ -171,24 +171,29 @@ Drawer {
                     }
                 }
             }
-            IconButton {
-                id: heartBtn
+            Item {
                 Layout.rightMargin: -12
-                iconName: app.currentLiked ? "heart-filled" : "heart"
-                label: app.currentLiked ? "Убрать из любимого" : "В любимое"
-                tint: app.currentLiked ? theme.accentPink : theme.text
-                iconSize: 26
-                onClicked: {
-                    var was = app.currentLiked
-                    app.toggleLike()
-                    if (!was && app.currentLiked && theme.motion)
-                        heartBurst.fire = true
+                Layout.preferredWidth: theme.touch
+                Layout.preferredHeight: theme.touch
+                IconButton {
+                    id: heartBtn
+                    anchors.fill: parent
+                    iconName: app.currentLiked ? "heart-filled" : "heart"
+                    label: app.currentLiked ? "Убрать из любимого" : "В любимое"
+                    tint: app.currentLiked ? theme.accentPink : theme.text
+                    iconSize: 26
+                    onClicked: {
+                        var was = app.currentLiked
+                        app.toggleLike()
+                        if (!was && app.currentLiked && theme.motion)
+                            heartBurst.fire = true
+                    }
                 }
-            }
-            Burst {
-                id: heartBurst
-                anchors.centerIn: heartBtn
-                color: theme.accentPink
+                Burst {
+                    id: heartBurst
+                    anchors.centerIn: parent
+                    color: theme.accentPink
+                }
             }
         }
 

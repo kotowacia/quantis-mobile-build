@@ -26,6 +26,27 @@ from PySide6.QtCore import QStandardPaths, QTimer, QUrl  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 
+# Некоторые сети отдают AAAA (IPv6) без рабочего маршрута: Python-запросы
+# (requests, yt-dlp) виснут на IPv6-адресе и не откатываются на IPv4, хотя
+# curl прекрасно ходит. Форсируем IPv4 для всех сокетов Python.
+import socket as _socket
+
+_orig_getaddrinfo = _socket.getaddrinfo
+
+
+def _ipv4_getaddrinfo(*args, **kwargs):
+    family = args[2] if len(args) > 2 else kwargs.get("family", 0)
+    if family == _socket.AF_UNSPEC:
+        if len(args) > 2:
+            args = list(args)
+            args[2] = _socket.AF_INET
+        else:
+            kwargs["family"] = _socket.AF_INET
+    return _orig_getaddrinfo(*args, **kwargs)
+
+
+_socket.getaddrinfo = _ipv4_getaddrinfo
+
 HERE = Path(__file__).resolve().parent
 
 
