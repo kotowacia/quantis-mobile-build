@@ -120,7 +120,20 @@ Drawer {
             }
         }
 
-        Item { Layout.fillHeight: true; Layout.minimumHeight: 16 }
+        // Визуализация «эквалайзера» между «декой» и названием.
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: app.eq && theme.motion ? 40 : 0
+            visible: app.eq && theme.motion
+            EqBars {
+                anchors.centerIn: parent
+                width: 140
+                height: 36
+                active: sheet.live
+            }
+        }
+
+        Item { Layout.fillHeight: true; Layout.minimumHeight: 12 }
 
         RowLayout {
             Layout.fillWidth: true
@@ -159,34 +172,45 @@ Drawer {
                 }
             }
             IconButton {
+                id: heartBtn
                 Layout.rightMargin: -12
                 iconName: app.currentLiked ? "heart-filled" : "heart"
                 label: app.currentLiked ? "Убрать из любимого" : "В любимое"
                 tint: app.currentLiked ? theme.accentPink : theme.text
                 iconSize: 26
-                onClicked: app.toggleLike()
+                onClicked: {
+                    var was = app.currentLiked
+                    app.toggleLike()
+                    if (!was && app.currentLiked && theme.motion)
+                        heartBurst.fire = true
+                }
+            }
+            Burst {
+                id: heartBurst
+                anchors.centerIn: heartBtn
+                color: theme.accentPink
             }
         }
 
-        Slider {
+        WaveformSeek {
             id: seek
             Layout.fillWidth: true
             Layout.topMargin: 12
             Layout.leftMargin: -6
             Layout.rightMargin: -6
+            Layout.preferredHeight: 30
             from: 0
             to: Math.max(1, app.duration)
-            value: pressed ? value : app.position
+            position: app.position
+            seed: app.title + "\u0000" + app.artist + "\u0000" + app.trackSource
             enabled: app.duration > 0
-            Material.accent: theme.text
             Accessible.name: "Позиция в треке"
-            onMoved: {}
-            onPressedChanged: if (!pressed) app.seek(value)
+            onSeekRequested: function (value) { app.seek(value) }
         }
         RowLayout {
             Layout.fillWidth: true
             Text {
-                text: theme.formatTime(seek.pressed ? seek.value : app.position)
+                text: theme.formatTime(seek.dragging ? seek.shown : app.position)
                 color: theme.textDim
                 font.family: theme.ui
                 font.pixelSize: 12

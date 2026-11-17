@@ -130,6 +130,14 @@ StackView {
             onBack: stack.pop()
         }
     }
+    Component {
+        id: statsPage
+        StatsPage { onBack: stack.pop() }
+    }
+    function openStats() {
+        if (stack.depth === 1)
+            stack.push(statsPage)
+    }
 
     // Строка медиатеки: значок, название, подпись, стрелка.
     component LibraryRow: ItemDelegate {
@@ -261,6 +269,12 @@ StackView {
                 caption: "История"
                 hint: stack.tracksLabel(app.history.count)
                 onClicked: stack.push(historyPage)
+            }
+            LibraryRow {
+                iconName: "chart"
+                caption: "Статистика"
+                hint: "Топ, время, ритм"
+                onClicked: stack.openStats()
             }
             LibraryRow {
                 iconName: "download"

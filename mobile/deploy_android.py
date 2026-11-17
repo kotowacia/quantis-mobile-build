@@ -32,14 +32,20 @@ from deploy_lib.android import android_config, buildozer  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 
+# Java-библиотека шторки (MediaBridge + PlaybackService) должна быть собрана
+# заранее: android/build_aar.sh (без неё p4a пытается скопировать как AAR
+# сам каталог проекта).
+AAR = os.environ.get("QUANTIS_AAR", "")
+if not AAR or not Path(AAR).is_file():
+    raise SystemExit("[quantis] quantis-media.aar не найден: android/build_aar.sh не собрал его")
+
 EXTRA = {
     # Метаданные активности: Qt читает background_running оттуда
     # (QtLoader.getMetaData → ComponentInfo.metaData), а android.meta_data
     # p4a кладёт в <application>. Файл вставляется в <activity> как есть,
     # поэтому без комментариев: «--» внутри XML-комментария ломал манифест.
     "android.manifest.intent_filters": str(HERE / "android" / "activity_meta.xml"),
-    "android.add_aars": os.environ["QUANTIS_AAR"],
-    # p4a кладёт AAR в libs/ и подключает как name:/ext:, а репозитория
+    "android.add_aars": AAR,    # p4a кладёт AAR в libs/ и подключает как name:/ext:, а репозитория
     # flatDir в его шаблоне нет: Gradle писал «Could not find :quantis-media:».
     "android.add_gradle_repositories": "flatDir { dirs 'libs' }",
     # Значок: адаптивный (фон + знак, Android 8+) и запасной квадрат.

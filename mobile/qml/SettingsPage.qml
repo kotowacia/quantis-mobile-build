@@ -132,6 +132,22 @@ Item {
                 selected: !app.motion
                 onClicked: app.setMotion(false)
             }
+            OnboardingCard {
+                title: "Эквалайзер"
+                subtitle: "Столбики в плеере и мини-плеере"
+                iconName: "music"
+                tone: theme.accentPink
+                selected: app.eq
+                onClicked: app.setEq(true)
+            }
+            OnboardingCard {
+                title: "Без столбиков"
+                subtitle: "Обычный плеер, тише экран"
+                iconName: "moon"
+                tone: theme.accentCyan
+                selected: !app.eq
+                onClicked: app.setEq(false)
+            }
 
             // --- Поиск -------------------------------------------------------
             SectionLabel { text: "Где искать" }

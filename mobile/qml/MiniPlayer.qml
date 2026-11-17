@@ -73,6 +73,13 @@ ItemDelegate {
                 elide: Text.ElideRight
             }
         }
+        EqBars {
+            Layout.preferredWidth: app.eq && theme.motion ? 40 : 0
+            Layout.preferredHeight: app.eq && theme.motion ? 24 : 0
+            active: app.playing && !app.loading
+            visible: app.eq && theme.motion
+            barWidth: 3
+        }
         IconButton {
             iconName: app.playing ? "pause" : "play"
             label: app.playing ? "Пауза" : "Играть"

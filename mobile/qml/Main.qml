@@ -24,6 +24,23 @@ ApplicationWindow {
     Theme { id: theme }
 
     property int tab: 0
+    property int prevTab: -1
+
+    // Плавное появление страницы при переключении вкладки (если «живой»
+    // интерфейс включён). StackLayout прячет неактивные страницы, поэтому
+    // только лёгкий fade + scale входа.
+    function popIn(pageObj) {
+        pageObj.opacity = 0.001
+        pageObj.scale = 0.985
+    }
+    onTabChanged: {
+        var index = window.tab
+        if (prevTab >= 0 && theme.motion && index !== prevTab) {
+            var target = index === 0 ? homeStack : index === 1 ? searchStack : libraryPage
+            popIn(target)
+        }
+        prevTab = index
+    }
 
     // Открыть страницу альбома/исполнителя/плейлиста/чарта в стеке вкладки.
     function openPage(stack, kind, ref, title) {
@@ -62,6 +79,10 @@ ApplicationWindow {
             StackView {
                 id: homeStack
                 initialItem: homePage
+                opacity: 1
+                scale: 1
+                Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                 HomePage {
                     id: homePage
                     onSearchRequested: function (query) {
@@ -80,9 +101,20 @@ ApplicationWindow {
             StackView {
                 id: searchStack
                 initialItem: searchPage
+                opacity: 1
+                scale: 1
+                Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                 SearchPage { id: searchPage }
             }
-            LibraryPage { id: libraryPage; objectName: "libraryPage" }
+            LibraryPage {
+                id: libraryPage
+                objectName: "libraryPage"
+                opacity: 1
+                scale: 1
+                Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+            }
         }
 
         MiniPlayer {
@@ -143,6 +175,15 @@ ApplicationWindow {
         height: window.height
         topPadding: window.safeTop
         bottomPadding: window.safeBottom
+    }
+
+    // Всплывающие уведомления сверху (действия, скачивания).
+    ToastHost {
+        id: toastHost
+    }
+    Connections {
+        target: app
+        function onNotify(text) { toastHost.show(text) }
     }
 
     // Приветствие при первом запуске — поверх всего, пока не пройдено.

@@ -66,6 +66,9 @@ HOME_CHART_KEY = "home/chart"
 HOME_RELEASES_KEY = "home/releases"
 ONBOARDED_KEY = "app/onboarded"  # приветствие пройдено
 MOTION_KEY = "ui/motion"  # живой интерфейс: аврора, пластинка
+EQ_KEY = "ui/eq"  # визуализация «эквалайзера» в плеере
+STATS_KEY = "stats/listens"  # завершённые прослушивания
+STATS_LIMIT = 4000
 # Подпись источника в плашке шторки.
 SOURCE_LABELS = {YANDEX: "Яндекс Музыка", YOUTUBE: "YouTube", SOUNDCLOUD: "SoundCloud"}
 HOME_REFRESH_S = 1800
@@ -284,6 +287,9 @@ class AppController(QObject):
     homeChanged = Signal()
     onboardedChanged = Signal()
     motionChanged = Signal()
+    eqChanged = Signal()
+    notify = Signal(str)  # всплывающие уведомления (тосты)
+    statsChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -390,6 +396,15 @@ class AppController(QObject):
         self._controls = MediaControls()
         self._animations = self._controls.animations_enabled()
         self._motion = self._settings.value(MOTION_KEY, True, type=bool)
+        self._eq = self._settings.value(EQ_KEY, True, type=bool)
+        # Завершённые прослушивания для статистики: [{t, s, i, a, n, c, d}].
+        self._listens: list[dict] = []
+        try:
+            raw = json.loads(str(self._settings.value(STATS_KEY, "[]") or "[]"))
+            if isinstance(raw, list):
+                self._listens = raw
+        except (TypeError, ValueError):
+            pass
         self._onboarded = self._settings.value(ONBOARDED_KEY, False, type=bool)
         self._controls_timer = QTimer(self)
         self._controls_timer.setInterval(400)
@@ -451,6 +466,7 @@ class AppController(QObject):
     def _flash(self, text: str) -> None:
         """Короткая подсказка о действии: сама исчезает через 2,5 с."""
         self._set_status(text)
+        self.notify.emit(text)
         QTimer.singleShot(2500, lambda: self._status == text and self._set_status(""))
 
     def _set_status(self, text: str) -> None:
@@ -1296,6 +1312,108 @@ class AppController(QObject):
         )
         self.queriesChanged.emit()
 
+    # --- статистика прослушиваний ------------------------------------------
+
+    @staticmethod
+    def _listen_key(item: dict) -> tuple[str, str]:
+        return (str(item.get("s") or ""), str(item.get("i") or ""))
+
+    def _save_listens(self) -> None:
+        self._settings.setValue(
+            STATS_KEY, json.dumps(self._listens, ensure_ascii=False)
+        )
+
+    def _record_listen(self) -> None:
+        """Дослушанный трек — в копилку статистики (как на десктопе)."""
+        track = self._track()
+        if track is None:
+            return
+        self._listens.append(
+            {
+                "t": int(time.time()),
+                "s": track.source,
+                "i": track.track_id,
+                "a": track.artist,
+                "n": track.title,
+                "c": track.cover,
+                "d": track.duration * 1000,
+            }
+        )
+        if len(self._listens) > STATS_LIMIT:
+            del self._listens[: len(self._listens) - STATS_LIMIT]
+        self._save_listens()
+        self.statsChanged.emit()
+
+    @Property("QVariantMap", notify=statsChanged)
+    def stats(self) -> dict:
+        """Снимок: итоги, топ треков/артистов и ритм слушания."""
+        listens = self._listens
+        by_track: dict[tuple[str, str], dict] = {}
+        by_artist: dict[str, dict] = {}
+        hours = [0] * 24
+        days = [0] * 7
+        listened_ms = 0
+        for item in listens:
+            key = self._listen_key(item)
+            entry = by_track.setdefault(
+                key, {"title": "", "artist": "", "cover": "", "count": 0}
+            )
+            if not entry["title"]:
+                entry.update(
+                    title=item.get("n") or "Без названия",
+                    artist=item.get("a") or "",
+                    cover=item.get("c") or "",
+                )
+            entry["count"] += 1
+            artist = item.get("a") or "—"
+            a = by_artist.setdefault(artist, {"name": artist, "cover": "", "count": 0})
+            if not a["cover"]:
+                a["cover"] = item.get("c") or ""
+            a["count"] += 1
+            try:
+                hours[int(time.strftime("%H", time.localtime(item["t"])))] += 1
+            except (KeyError, TypeError, ValueError):
+                pass
+            try:
+                days[(time.localtime(item["t"]).tm_wday + 1) % 7] += 1
+            except (KeyError, TypeError, ValueError):
+                pass
+            listened_ms += int(item.get("d") or 0)
+        top_tracks = [
+            {
+                "title": e["title"],
+                "artist": e["artist"],
+                "cover": e["cover"],
+                "count": e["count"],
+            }
+            for e in sorted(by_track.values(), key=lambda e: e["count"], reverse=True)[:5]
+        ]
+        top_artists = [
+            {"name": e["name"], "cover": e["cover"], "count": e["count"]}
+            for e in sorted(by_artist.values(), key=lambda e: e["count"], reverse=True)[:5]
+        ]
+        return {
+            "listens": len(listens),
+            "tracks": len(by_track),
+            "ms": listened_ms,
+            "hours": hours,
+            "days": days,
+            "topTracks": top_tracks,
+            "topArtists": top_artists,
+        }
+
+    @Property(bool, notify=eqChanged)
+    def eq(self) -> bool:
+        """Визуализация «эквалайзера» в плеере и мини-плеере."""
+        return self._eq
+
+    @Slot(bool)
+    def setEq(self, enabled: bool) -> None:
+        if enabled != self._eq:
+            self._eq = enabled
+            self._settings.setValue(EQ_KEY, enabled)
+            self.eqChanged.emit()
+
     @Slot(int)
     def playHistory(self, row: int) -> None:
         self.playFrom("history", row)
@@ -1787,6 +1905,7 @@ class AppController(QObject):
 
     def _on_media_status(self, status: QMediaPlayer.MediaStatus) -> None:
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            self._record_listen()  # трек дослушан — считаем для статистики
             if self._sleep_end_of_track:  # таймер «до конца трека»
                 self.setSleep(0)
                 self._wants_play = False
